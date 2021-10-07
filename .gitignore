@@ -1,0 +1,43 @@
+# Vim session files and swap files
+tags
+.vimsession
+.*.sw[a-z]
+
+# Python stuff
+*.pyc
+__pycache__
+.ipynb_checkpoints
+
+# Common temporary files
+*.log
+*.tmp
+
+# Trash
+old
+trash
+garbage
+
+# Compiled source
+*.com
+*.class
+*.dll
+*.exe
+*.o
+*.so
+
+# Compressed files
+*.7z
+*.dmg
+*.gz
+*.iso
+*.jar
+*.rar
+*.tar
+*.zip
+
+# OS-generated files
+.nfs*
+.DS_Store
+.DS_Store?
+.Trashes
+._*
