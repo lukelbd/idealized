@@ -30,7 +30,7 @@ import xarray as xr
 from climopy import vreg
 from icecream import ic  # noqa: F401
 
-import definitions  # noqa: F401
+from . import definitions  # noqa: F401
 
 _LoadWarning = type('LoadWarning', (UserWarning,), {})
 _warn_simple = functools.partial(warnings.warn, category=_LoadWarning, stacklevel=2)
