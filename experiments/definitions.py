@@ -78,15 +78,15 @@ with warnings.catch_warnings():
     vreg.define('count', 'count', '')
     vreg.define('rate', 'rate', 'days^-1')
     vreg.define('timescale', 'timescale', 'days')
-    vreg.define('scale', 'length scale', 'km')
+    vreg.define('scale', 'length scale', '1000km')
     vreg.define('corr', 'correlation coefficient', '', 'correlation')
     # vreg.define('k', 'zonal wavenumber', '')
     # vreg.define('f', 'frequency', 'days')  # i.e. temporal wavenumber
 
     # Basic state quantities
-    vreg.define('u', 'zonal wind', 'm / s', 'zonal wind', parents='momentum')
-    vreg.define('v', 'meridional wind', 'm / s', 'meridional wind', parents='momentum')
-    vreg.define('t', 'temperature', 'K', 'temperature', parents='energy')
+    vreg.define('u', 'zonal wind', 'm / s', 'zonal wind', parents='momentum', aliases='u')  # noqa: E501
+    vreg.define('v', 'meridional wind', 'm / s', 'meridional wind', parents='momentum', aliases='v')  # noqa: E501
+    vreg.define('t', 'temperature', 'K', 'temperature', parents='energy', aliases='ta')
     vreg.define('z', 'geopotential height', 'km', 'geopotential height', parents='energy')  # noqa: E501
     vreg.define('w', 'vertical wind', 'cm / s', 'vertical wind', parents='momentum')
     vreg.define('q', 'specific humidity', 'g / kg')
@@ -207,7 +207,7 @@ with warnings.catch_warnings():
     vreg.define('chf', short_name='heating rate', long_suffix='convergence', standard_units='K / day', parents=('hf', 'energy_flux'))  # noqa: E501
     vreg.define('cmhf', long_prefix='mean', parents='chf')
     vreg.define('cehf', long_prefix='eddy', parents='chf')
-    vreg.define('ehfcorr', long_prefix='eddy heat', parents='corr')
+    vreg.define('ehf_corr', long_prefix='eddy heat', parents='corr')
     vreg.define('ehf_bulk', long_prefix='bulk', parents='ehf')
 
     # Geopotential fluxes
@@ -230,8 +230,8 @@ with warnings.catch_warnings():
     vreg.alias('meridional_momentum_flux', 'mf')
     vreg.define('mmf', long_prefix='mean', parents='mf')
     vreg.define('emf', long_prefix='eddy', parents='mf')
-    vreg.define('emfcos', long_prefix='scaled', parents='emf')  # scaled by cosine
-    vreg.define('emfcorr', parents='corr', long_prefix='eddy momentum')
+    vreg.define('emf_cos', long_prefix='scaled', parents='emf')  # scaled by cosine
+    vreg.define('emf_corr', parents='corr', long_prefix='eddy momentum')
     vreg.define('cmf', short_name='eastward torque', long_suffix='convergence', standard_units='m s^-1 day^-1', parents=('mf', 'acceleration'))  # noqa: E501
     vreg.define('cmmf', long_prefix='mean', parents='cmf')
     vreg.define('cemf', long_prefix='eddy', parents='cmf')
@@ -300,7 +300,7 @@ with warnings.catch_warnings():
     vreg.define('slope', 'isentropic slope', 'm / km')
     vreg.define('pslope', 'isentropic pressure slope', 'hPa / km')
     vreg.define('slope_bulk', long_prefix='bulk', parents='slope')
-    vreg.define('critical', 'criticality parameter', symbol=r'\Delta\Theta_h / \Delta\Theta_v')  # noqa: E501
+    vreg.define('slope_diff', long_prefix='dimensionless', standard_units='K / K', parents='slope', symbol=r'\Delta\Theta_h / \Delta\Theta_v')  # noqa: E501
     vreg.define('ratio', 'equilibrium temperature gradient ratio', symbol=r'\Delta\Theta_h / \Delta\Theta_{h,eq}')  # noqa: E501
     vreg.define('trop', 'WMO tropopause', parents='plev')
     vreg.define('ztrop', 'WMO tropopause height', parents='zlev')
@@ -455,8 +455,8 @@ with warnings.catch_warnings():
     # ### Basic thermodynamic quantities
     @climo.register_derivation(re.compile(r'\A[ptz]lev\Z'))
     def vertical_level(self, name):
-        # Vertical level. This lets us use the same name for the vertical coordinate but
-        # have more precise variables for different level types
+        # Vertical level. This lets us use the same name for the vertical
+        # coordinate but have more precise variables for different level types.
         lev = self.lev
         if name[0] == 'p':
             assert lev.climo.units.is_compatible_with('Pa')
@@ -466,23 +466,31 @@ with warnings.catch_warnings():
             assert lev.climo.units.is_compatible_with('K')
         return lev
 
-    @climo.register_derivation(('pres', 't', 'pt'))
+    @climo.register_derivation(('pres', 'pt', 't'))
     def temperature_pressure(self, name):
-        # Retrieve temperature and pressure, accounting for situations where these
-        # represent the *vertical coordinate*
+        # Retrieve temperature and pressure accounting for situations
+        # where these represent the *vertical coordinate*.
         # WARNING: Cannot call pressure 'p' due to name conflict with potential energy
         vert = self.cf.vertical_type
         if name == 'pres':
-            return self.lev if vert == 'pressure' else NotImplemented
+            if vert == 'pressure':
+                return self.lev
+            else:
+                raise NotImplementedError('Can only get pres from isobaric levels.')
         elif name == 't':
-            return self.lev * self.exner if vert == 'temperature' else NotImplemented
+            if vert == 'temperature':
+                return self.lev * self.exner
+            else:
+                raise NotImplementedError('Can only get temp from isentropic levels.')
         else:
-            return self.lev if vert == 'temperature' else self.t / self.exner
+            if vert == 'temperature':
+                return self.lev
+            else:
+                return self.t / self.exner
 
     @climo.register_derivation('w')
     def vertical_wind(self):
         # Vertical wind in m/s converted from omega
-        # data = -H * self[name].values / lev[:,None]
         return (-1 / (const.g * self.rho)) * self.omega
 
     @climo.register_derivation('rho')
@@ -868,6 +876,7 @@ with warnings.catch_warnings():
     @climo.register_derivation(re.compile(r'\A(t|pv|dse)_diffusivity\Z'))
     def local_diffusivity(self, name):
         # Eddy diffusivity, in units m^2/s, masking out regions with tiny gradients
+        name, _ = name.split('_')
         grad = self['d' + name + 'dy']
         flux = self['e' + ('h' if name == 't' else name) + 'f']
         data = flux / grad
@@ -980,12 +989,12 @@ with warnings.catch_warnings():
         rho = self.rho  # need rho to convert d/dp to d/dz
         return -const.g * rho * u.climo.derivative(lev=1)
 
-    @climo.register_derivation('ehfcorr')
+    @climo.register_derivation('ehf_corr')
     def eddy_heat_flux_correlation_coefficient(self):
         # Correlation coefficient for heat flux
         return self.ehf / (self.vstd * self.tstd)
 
-    @climo.register_derivation('emfcorr')
+    @climo.register_derivation('emf_corr')
     def eddy_angular_momentum_flux_correlation_coefficient(self):
         # Correlation coefficient for momentum flux
         return self.ehf / (self.vstd * self.ustd)
@@ -1131,6 +1140,33 @@ with warnings.catch_warnings():
             data = data.climo.to_units('m')
         return data
 
+    @climo.register_derivation(('ld', 'constld', 'massld'))
+    def rossby_deformation_radius(self, name):  # noqa: U100
+        # Rhossby deformation radius
+        # TODO: Get ave scale height *up to tropopause*
+        # b = self.get('b', lev='avg', lev_min=250 * ureg.hPa)
+        f = self.cor
+        b = self.get('b')
+        ztrop = self.ztrop
+        return b * ztrop / f  # radius deformation
+
+    @climo.register_derivation('lr')
+    def rhines_beta_scale(self):
+        # Rhines beta-scale
+        # vstd = self.get('vstd', lev='avg', lev_min=250 * ureg.hPa)
+        beta = -1 * self.beta
+        vstd = self.get('vstd')
+        return np.sqrt(2) * vstd / np.sqrt(beta)
+
+    @climo.register_derivation('ldisp')
+    def barry_eddy_displacement_scale(self):
+        # Barry et al. (2005) displacement length scale
+        # tstd = self.get('tstd', lev='avg', lev_min=250 * ureg.hPa)
+        # dtdy = self.get('dtdy', lev='avg', lev_min=250 * ureg.hPa)
+        tstd = self.get('tstd')
+        dtdy = self.get('dtdy')
+        return tstd / np.abs(dtdy)
+
     # ### Tropopause metrics
     @climo.register_derivation('pvtrop')
     def potential_vorticity_tropopause(self):
@@ -1146,7 +1182,7 @@ with warnings.catch_warnings():
         mpsi = self.get('mpsiresid', area='avg', lat_lim=(10, 40))
         thresh = mpsi.min(dim='lev') * 0.1
         data = (mpsi - thresh).climo.reduce(
-            lev='argzero', levmax=500 * ureg.hPa, dataset=self.data,
+            lev='argzero', lev_max=500 * ureg.hPa, dataset=self.data,
         )
         return data.max(dim='line')
 
@@ -1159,7 +1195,7 @@ with warnings.catch_warnings():
         trop = -2 * ureg.K / ureg.km
         dtdz = self.dtdz
         data = (dtdz - trop).climo.reduce(
-            lev='argzero', levmax=350 * ureg.hPa,
+            lev='argzero', lev_max=350 * ureg.hPa,
             dim_track='lat', which='posneg', dataset=self.data,
         )
         data = data.min(dim='track')  # minimum of obtained values
@@ -1174,7 +1210,7 @@ with warnings.catch_warnings():
         # of rate of decrease is fastest, i.e. curvature has minimum.
         dcurv = self.dcurvature
         data = dcurv.climo.reduce(
-            lev='argzero', levmax=350 * ureg.hPa, dataset=self.data,
+            lev='argzero', lev_max=350 * ureg.hPa, dataset=self.data,
             dim_track='lat', ntrack=1, which='negpos',
             seed=150, sep=50,  # TODO: support units here
         )
@@ -1184,20 +1220,29 @@ with warnings.catch_warnings():
             data = data.climo.to_units('km')
         return data
 
-    # ### Diffusivity and criticality metrics
+    # ### Bulk criticality metrics
     @climo.register_derivation('slope_bulk')
     def bulk_isentropic_slope(self):
         # Bulk slope (should have units meters per meter)
         return self.dptdy_bulk / self.dptdz_bulk
 
-    @climo.register_derivation('critical')
-    def criticality_parameter(self):
+    @climo.register_derivation('slope_diff')
+    def diff_isentropic_slope(self):
         # The criticality parameter.
         pt = self.get('pt', lev='avg', lat=LAT_LIM, lev_lim=LEV_LIM)
         dptdy = pt.diff('lat').squeeze(drop=True)
         pt = self.get('pt', area='avg', lev=LEV_LIM, lat_lim=LAT_LIM)
         dptdz = pt.diff('lev').squeeze(drop=True)
         return dptdy / dptdz
+
+    @climo.register_derivation('shear_bulk')
+    def bulk_vertical_zonal_wind_shear(self):
+        # Upper-lower difference
+        data = (
+            self.get('u', lev=250 * ureg.hPa)
+            - self.get('u', lev=1000 * ureg.hPa)
+        )
+        return data
 
     @climo.register_derivation('ratio')
     def equilibrium_temperature_ratio(self):
@@ -1216,7 +1261,7 @@ with warnings.catch_warnings():
         name = re.sub(r'\Ad(.*)dy_bulk\Z', r'\1', name)
         vertical = self.cf.vertical_type
         if vertical == 'temperature' and name == 'dse':
-            raise NotImplementedError
+            raise NotImplementedError('Cannot get DSE gradient on isentropic levels.')
         elif vertical == 'temperature':
             # Use gradient of sea-level potential temp (close enough to temp)
             idx = np.round(0.5 * self.x.size).astype(int)
@@ -1258,6 +1303,7 @@ with warnings.catch_warnings():
         # dt /= z.climo.interp(lev=LEV_LIM).diff('lev').squeeze(drop=True)
         return dt
 
+    # ### Bulk diffusivity metrics
     @climo.register_derivation(('ehf_bulk', 'edsef_bulk'))
     def bulk_eddy_flux(self, name):
         # Preset average for meridional eddy flux
@@ -1277,8 +1323,8 @@ with warnings.catch_warnings():
     def barry_eddy_heat_flux(self):
         # Barry et al. (2005) heat flux param. TODO: Double check
         e = 0.75  # utilization coefficient
-        q = self.get('tdt', lev='avg', levmin=500 * ureg.hPa)
-        k = self.get('corr', lev='avg', levmin=500 * ureg.hPa)
+        q = self.get('tdt', lev='avg', lev_min=500 * ureg.hPa)
+        k = self.get('corr', lev='avg', lev_min=500 * ureg.hPa)
         t0 = self.get('t', area='avg', lev='avg')
         dtdy = self.dtdy_bulk
         beta = self.beta
@@ -1288,42 +1334,8 @@ with warnings.catch_warnings():
     def barry_meridional_wind_zonal_standard_deviation(self):
         # Barry et al. (2005) RMS meridional wind param. TODO: Double check
         e = 0.75  # utilization coefficient
-        q = self.get('tdt', lev='avg', levmin=500 * ureg.hPa)
+        q = self.get('tdt', lev='avg', lev_min=500 * ureg.hPa)
         t0 = self.get('t', area='avg', lev='avg')
-        dtdy = self.get('dtdy', lev='avg', levmin=500 * ureg.hPa)
+        dtdy = self.get('dtdy', lev='avg', lev_min=500 * ureg.hPa)
         beta = self.beta
         return (e * const.a * dtdy * q / t0) ** 0.4 * (2 / beta) ** 0.2
-
-    @climo.register_derivation('shear_bulk')
-    def bulk_vertical_zonal_wind_shear(self):
-        # Upper-lower difference
-        data = (
-            self.get('u', lev=250 * ureg.hPa)
-            - self.get('u', lev=1000 * ureg.hPa)
-        )
-        return data
-
-    # ### Length scales
-    @climo.register_derivation(('ld', 'constld', 'massld'))
-    def rossby_deformation_radius(self, name):
-        # Rhossby deformation radius
-        # TODO: Get ave scale height *up to tropopause*
-        f = self.cor
-        b = self.get('b', lev='avg', levmin=250 * ureg.hPa)
-        ztrop = self.ztrop
-        return b * ztrop / f  # radius deformation
-
-    @climo.register_derivation('lr')
-    def rhines_beta_scale(self):
-        # Rhines beta-scale
-        beta = -1 * self.beta
-        vstd = self.get('vstd', lev='avg', levmin=250 * ureg.hPa)
-        return np.sqrt(2) * vstd / np.sqrt(beta)
-
-    @climo.register_derivation('ldisp')
-    def barry_eddy_displacement_scale(self):
-        # Barry et al. (2005) displacement length scale
-        # NOTE: Take verticantinuity by including points near tropopause
-        tstd = self.get('tstd', lev='avg', levmin=250 * ureg.hPa)
-        dtdy = self.get('dtdy', lev='avg', levmin=250 * ureg.hPa)
-        return tstd / dtdy
