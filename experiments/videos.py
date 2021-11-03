@@ -16,7 +16,7 @@ from climopy import const
 # * WARNING: The default 'savefig' action ***has*** to use transparent=False,
 #   or weird shit will happen e.g. all boundaries and text getting redrawn/becoming
 #   way thicker after the first frame!
-def xyvideo(
+def surfaces(
     vname,  # video filename
     datas,  # list of xarray Datasets
     labels,  # labels
@@ -227,7 +227,7 @@ def xyvideo(
     return mov  # return movie object
 
 
-def yzvideo(
+def xsections(
     vname,  # video filename
     datas,  # list of xarray Datasets
     labels,  # label and values
