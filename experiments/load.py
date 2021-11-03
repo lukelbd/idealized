@@ -106,14 +106,14 @@ def _make_stopwatch(timer=False, fixedwidth=20):
     return _stopwatch
 
 
-def load_cam5(
+def load_cam(
     base='~/data/cam5/',
     hs94='~/data/timescales_constants/hs1_t85l60e.nc',
     subdirs=('forcing', 'kernels'),
     timer=False,
 ):
     """
-    Load the CAM5 forcing and feedback kernel data.
+    Load the CAM forcing and feedback kernel data.
     """
     # Get list of files
     stopwatch = _make_stopwatch(timer=timer)  # noqa: F841
