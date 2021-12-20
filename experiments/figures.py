@@ -2123,7 +2123,7 @@ def xsections(
                 x, y = (args[0].coords[dim] for dim in args[0].dims)
             else:
                 x = y = None  # not restricted to in-bounds
-            vmin, vmax, _ = ax._parse_vlim(x, y, *args)
+            vmin, vmax, _ = ax._parse_level_lim(x, y, *args)
         else:
             vmin = vmax = None
 
