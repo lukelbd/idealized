@@ -1198,7 +1198,8 @@ with warnings.catch_warnings():
             lev='argzero', lev_max=350 * ureg.hPa,
             dim_track='lat', which='posneg', dataset=self.data,
         )
-        data = data.min(dim='track')  # minimum of obtained values
+        if 'track' in data.dims:
+            data = data.min(dim='track')  # minimum of obtained values
         if name == 'ztrop':
             data = const.H * np.log(const.p0 / data)  # log-pressure coords
             data = data.climo.to_units('km')
@@ -1214,7 +1215,8 @@ with warnings.catch_warnings():
             dim_track='lat', ntrack=1, which='negpos',
             seed=150, sep=50,  # TODO: support units here
         )
-        data = data.min(dim='track')
+        if 'track' in data.dims:
+            data = data.min(dim='track')
         if name == 'zctrop':
             data = const.H * np.log(const.p0 / data)  # log-pressure coords
             data = data.climo.to_units('km')

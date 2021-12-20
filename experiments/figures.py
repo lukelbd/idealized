@@ -15,8 +15,8 @@ import numpy as np
 import proplot as pplt
 from icecream import ic  # noqa: F401
 
+from . import load
 from climopy import vreg, ureg, const  # noqa: F401
-from experiments import load
 
 pplt.rc.autoformat = False
 pplt.rc['subplots.refwidth'] = 1.8
