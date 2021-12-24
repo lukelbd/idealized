@@ -1195,7 +1195,7 @@ with warnings.catch_warnings():
         trop = -2 * ureg.K / ureg.km
         dtdz = self.dtdz
         data = (dtdz - trop).climo.reduce(
-            lev='argzero', lev_max=350 * ureg.hPa,
+            lev='argzero', lev_min=80 * ureg.hPa, lev_max=350 * ureg.hPa,
             dim_track='lat', which='posneg', dataset=self.data,
         )
         if 'track' in data.dims:
