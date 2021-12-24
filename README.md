@@ -1,5 +1,5 @@
-Experiments
------------
+Common utilities
+----------------
 
-This project contains various classes and functions for working with
-idealized model experiments and CMIP datasets across different projects.
+This project contains various classes and functions for processing
+observational and climate model data.
