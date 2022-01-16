@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-
+Load the experiment data.
 """
 import glob
 import os
@@ -13,17 +13,16 @@ from icecream import ic  # noqa: F401
 
 from . import _make_stopwatch, _warn_simple, definitions  # noqa: F401
 
+ATTRS_OVERRIDES = {
+    'u': {'long_name': 'zonal wind'},
+    'v': {'long_name': 'meridional wind'},
+}
 SEASON_IDXS = {
     'djf': (11, 0, 1),
     'mma': (2, 3, 4),
     'jja': (5, 6, 7),
     'son': (8, 9, 10),
     **{i: (i - 1,) for i in range(1, 13)},  # e.g. 'month 1' is index 0 in month array
-}
-
-ATTRS_OVERRIDES = {
-    'u': {'long_name': 'zonal wind'},
-    'v': {'long_name': 'meridional wind'},
 }
 
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Figures detailing arbitrary experiment results.
+Templates for figures detailing arbitrary experiment results.
 """
 import functools
 import itertools

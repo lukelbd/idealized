@@ -17,18 +17,16 @@ def _make_stopwatch(timer=False, fixedwidth=20):
     if 't' not in globals():
         global t
         t = time.time()
-    def _stopwatch(message):  # noqa: E306
+    def _stopwatch(msg):  # noqa: E306
         global t
         if timer:
-            print(
-                message + ':' + ' ' * (fixedwidth - len(message)),
-                -t + (t := time.time())
-            )
+            print(msg + ':' + ' ' * (fixedwidth - len(msg)), -t + (t := time.time()))
     return _stopwatch
 
 
 from climopy import ureg, vreg, const  # noqa: F401
+from . import data  # noqa: F401
 from . import definitions  # noqa: F401
+from . import experiment  # noqa: F401
 from . import figures  # noqa: F401
-from . import load  # noqa: F401
 from . import videos  # noqa: F401

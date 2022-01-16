@@ -1058,13 +1058,13 @@ with warnings.catch_warnings():
     def ertel_isentropic_potential_vorticity(self):
         # TODO: Integrate with metpy
         # TODO: Add this
-        raise NotImplementedError
+        raise NotImplementedError('Cannot get potential vorticity.')
 
     @climo.register_derivation('qgpv')
     def quasi_geostrophic_potential_vorticity(self):
         # TODO: Integrate with metpy
         # TODO: Add this
-        raise NotImplementedError
+        raise NotImplementedError('Cannot get potential vorticity.')
 
     @climo.register_derivation('epy')
     def meridional_eliassan_palm_flux(self):
