@@ -26,22 +26,80 @@ SEASON_IDXS = {
 }
 
 
-def load_cam(
-    base='~/data/cam5/',
-    hs94='~/data/timescales_constants/hs1_t85l60e.nc',
-    subdirs=('forcing', 'kernels'),
+def combine_cam_kernels(
+    path='~/data/kernels-cam5/cam5_plev.nc',
+    # ref='~/data/timescales_constants/hs1_t85l60e.nc',
+    month=None,
+    season=None,
+    shortwave=True,
+):
+    """
+    Create averages of
+
+    Parameters
+    ----------
+    path : path-like, optional
+        CAM data location.
+    month : month-spec, optional
+        Month(s) to be averaged.
+    season : season-spec, optional
+        Season(s) to be averaged.
+    shortwave : bool, optional
+        Whether to include shortwave components.
+    """
+    # Load kernel data, fixing sign convention so both LW and SW are +ve toward
+    # atmosphere (default is SW positive down, LW positive up, understandably).
+    # Also get cloudy-sky and net atmospheric components.
+    # NOTE: See load.py:load_cam for details
+    # NOTE: Xarray caches already-loaded datasets so this is fast after one run
+    print('Calculating averages...')
+    ds_cam5 = xr.open_dataset(path)
+    keep = ('ps', 'bnd', 'fln') + (('fsn',) if shortwave else ())
+    drop = tuple(var for var in ds_cam5 if not any(s in var for s in keep))
+    ds_cam5 = ds_cam5.drop_vars(drop)  # drop surface kernels, and maybe shortwave
+    ds_cam5 = ds_cam5.climo.sel_time(season=season, month=month)
+    ds_cam5 = ds_cam5.climo.mean('time')
+    ds_cam5['ps'].attrs['standard_name'] = 'surface_air_pressure'
+    with xr.set_options(keep_attrs=True):
+        for var in ds_cam5:
+            if 'flnt' in var or 'fsns' in var:
+                ds_cam5[var] *= -1
+        for var in ('t_fln', 'q_fln', 'q_fsn', 'ts_fln', 'alb_fsn'):
+            for s in ('c', ''):
+                if var + 't' + s in ds_cam5 and var + 's' + s in ds_cam5:
+                    ds_cam5[var + 'a' + s] = ds_cam5[var + 't' + s] + ds_cam5[var + 's' + s]  # noqa: E501
+            for s in ('t', 's', 'a'):
+                if var + s + 'c' in ds_cam5 and var + s in ds_cam5:
+                    ds_cam5[var + s + 'l'] = ds_cam5[var + s] - ds_cam5[var + s + 'c']
+    ds_cam5 = ds_cam5.climo.standardize_coords()
+    ds_cam5 = ds_cam5.climo.add_cell_measures(verbose=True)
+    ds_cam5 = ds_cam5.climo.quantify()
+    return ds_cam5
+
+
+def load_cam_kernels(
+    path='~/data/kernels-cam5/',
+    folders=('forcing', 'kernels'),
+    ref='~/data/timescales_constants/hs1_t85l60e.nc',
     timer=False,
 ):
     """
     Load the CAM forcing and feedback kernel data.
+
+    Parameters
+    ----------
+    base : path-like
+        The base directory in which `folders` is indexed.
+    ref : path-like
+        The path used for destination parameters.
     """
     # Get list of files
     stopwatch = _make_stopwatch(timer=timer)  # noqa: F841
     ps = set()
     files = [
         file
-        for subdir in subdirs
-        for file in glob.glob(os.path.expanduser(f'{base}/{subdir}/*.nc'))
+        for folder in folders
+        for file in glob.glob(os.path.expanduser(f'{path}/{folder}/*.nc'))
     ]
     files = [  # remove surface pressure file and record it separately
         file for file in files
@@ -99,7 +157,7 @@ def load_cam(
     # Interpolate onto standard pressure levels using metpy
     # NOTE: Also normalize by pressure level thickness, giving units W m^-2 100hPa^-1
     # TODO: Are copies of data arrays necessary?
-    ds_hs94 = xr.open_dataset(hs94, decode_times=False)
+    ds_hs94 = xr.open_dataset(ref, decode_times=False)
     if 'plev' in ds_hs94.coords:
         ds_hs94 = ds_hs94.rename(plev='lev', plev_bnds='lev_bnds')
     ds_plev = xr.Dataset(
@@ -132,14 +190,14 @@ def load_cam(
 
     # Save and return
     try:
-        ds_mlev.to_netcdf(f'{base}/cam5_mlev.nc')
-        ds_plev.to_netcdf(f'{base}/cam5_plev.nc')
+        ds_mlev.to_netcdf(f'{path}/cam5_mlev.nc')
+        ds_plev.to_netcdf(f'{path}/cam5_plev.nc')
     except Exception:
         _warn_simple('Failed to save datasets. Possible permissions error.')
     return ds_mlev, ds_plev
 
 
-def load_gfdl(
+def load_gfdl_file(
     *files, hemi='ave', lat=None, plev=None, add=None, days=None, timer=False, variables=None,  # noqa: E501
 ):
     """

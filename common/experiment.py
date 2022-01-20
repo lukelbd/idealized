@@ -27,8 +27,8 @@ import xarray as xr
 from climopy import vreg
 from icecream import ic  # noqa: F401
 
-from . import _make_stopwatch, _warn_simple, load
-from . import definitions  # noqa: F401
+from .data import load_gfdl_file
+from . import _make_stopwatch, _warn_simple
 
 SCRATCH = '/mdata1/ldavis'  # TODO: iterate through possible scratch dirs
 STORAGE = os.path.expanduser('~/data/timescales')
@@ -305,7 +305,7 @@ class Experiment(object):
         **params_drop : list of float, optional
             Lists of param values to explicitly ignore. Should have suffix '_drop'.
         **kwargs
-            Passed to `load_gfdl`.
+            Passed to `load_gfdl_file`.
         """
         # Bail if selection has not changed since last call
         # This prevents unnecessary loads and calculations
@@ -349,7 +349,7 @@ class Experiment(object):
             # Load data
             if parts[0] == STORAGE:  # only use dataset with longest end time
                 files = files[-1:]
-            dataset = load.load_gfdl(*files, timer=timer, **kwargs)
+            dataset = load_gfdl_file(*files, timer=timer, **kwargs)
             if verbose:
                 days = tuple(int(d) for f in files for d in re.findall(r'\bd([0-9]+)', f))  # noqa: E501
                 print(f'Loaded {expname} (days {min(days)}-{max(days)})')
@@ -372,7 +372,7 @@ class Experiment(object):
             else:
                 if parts[0] == STORAGE:  # only use dataset with longest end time
                     files = files[-1:]
-                dataset_base = load.load_gfdl(*files, **kwargs)
+                dataset_base = load_gfdl_file(*files, **kwargs)
                 for var in dataset_base:
                     if var not in dataset:  # e.g. spectral also has 'tvar'
                         dataset[var] = dataset_base[var]
@@ -382,7 +382,7 @@ class Experiment(object):
             # experiments do not have this data.
             file_constants = os.path.join(dir, 'constants.nc')
             if file_constants not in files:
-                dataset_constants = load.load_gfdl(file_constants, **kwargs)
+                dataset_constants = load_gfdl_file(file_constants, **kwargs)
                 for var in ('teq', 'forcing', 'ndamp', 'rdamp'):
                     if var in dataset_constants:
                         dataset[var] = dataset_constants[var]

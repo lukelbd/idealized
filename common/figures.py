@@ -15,7 +15,7 @@ import numpy as np
 import proplot as pplt
 from icecream import ic  # noqa: F401
 
-from . import load
+from . import experiment
 from climopy import vreg, ureg, const  # noqa: F401
 
 pplt.rc.autoformat = False
@@ -55,7 +55,7 @@ def _compare_experiments(*args):
 
     Parameters
     ----------
-    *args : `load.Experiment`
+    *args : `experiment.Experiment`
         The experiments.
 
     Returns
@@ -546,7 +546,7 @@ def _parse_explists(args):
     """
     if not any(isinstance(arg, list) for arg in args):
         args = [[arg] for arg in args]  # default to single series per subplot
-    if not all(isinstance(_, load.Experiment) for arg in args for _ in arg):
+    if not all(isinstance(_, experiment.Experiment) for arg in args for _ in arg):
         raise ValueError('Input data must be Experiment.')
     return args
 
@@ -639,7 +639,7 @@ def _savefig(func):
     def wrapper(*args, prefix=True, filename=None, dir='../figures', **kwargs):
         fig, axs = func(*args, **kwargs)
         if filename:
-            prefix = load._joint_name(*args) + '_' if prefix else ''
+            prefix = experiment._joint_name(*args) + '_' if prefix else ''
             path = f'./{dir}/{prefix}{filename}.pdf'
             print(f'Saving figure: {os.path.basename(path)}')
             fig.save(path)
@@ -662,7 +662,7 @@ def _subplot_per_simulation(
 
     Parameters
     ----------
-    exp : `load.Experiment` or list thereof
+    exp : `experiment.Experiment` or list thereof
         The experiment(s).
     nvars : int
         The number of variables to plot.
@@ -832,7 +832,7 @@ def curves(
     Parameters
     ----------
     *args : `xarray.Dataset`
-        The dataset(s). Often this is an expanded `load.Experiment`.
+        The dataset(s). Often this is an expanded `experiment.Experiment`.
     spec : str, (str, dict), or list thereof
         The variable spec(s) to be plotted. Parsed by `_parse_speclists`.
     transpose : bool, optional
@@ -989,7 +989,7 @@ def lorenz(
 
     Parameters
     ----------
-    *args : `load.Experiment`
+    *args : `experiment.Experiment`
         The experiment(s). The "current data" should be NetCDF files
         containing time series of globally averaged energy budget terms.
     parametric : bool, optional
@@ -1000,7 +1000,7 @@ def lorenz(
     """
     # Standardize input
     # TODO: Clean this function up.
-    if not all(isinstance(_, load.Experiment) for _ in args):
+    if not all(isinstance(_, experiment.Experiment) for _ in args):
         raise ValueError('Input args must be Experiment.')
     kwargs.update({'xmargin': 0, 'ymargin': 0.05})
 
@@ -1238,7 +1238,7 @@ def parametric(
 
     Parameters
     ----------
-    *args : `load.Experiment`
+    *args : `experiment.Experiment`
         The experiments.
     xspec, yspec : str, (str, dict), or list thereof
         Variable specs passed to `param`. These are parsed with `_parse_speclists`.
@@ -1271,7 +1271,7 @@ def parametric(
         kwopts = {}
         for j, exp in enumerate(args):
             # Get x and y coordinates
-            if not isinstance(exp, load.Experiment):
+            if not isinstance(exp, experiment.Experiment):
                 raise ValueError(f'Invalid experiment {exp}.')
             lines = []
             kwaxes = {}
@@ -1442,7 +1442,7 @@ def series(
 
     Parameters
     ----------
-    *args : `load.Experiment`
+    *args : `experiment.Experiment`
         The experiment(s) passed as positional arguments. Pass a list of lists to
         put different experiments in a single subplot.
     spec : str, (str, dict), or list thereof
@@ -1702,7 +1702,7 @@ def stacks(
 
     Parameters
     ----------
-    *args : `load.Experiment`
+    *args : `experiment.Experiment`
         The experiments.
     spec : str, (str, dict), or list thereof, optional
         The variable spec(s) to be plotted. Parsed by `_parse_speclists`.
@@ -1721,7 +1721,7 @@ def stacks(
     """
     if spec is None:
         raise ValueError('Must specify variable for plotting.')
-    if not all(isinstance(_, load.Experiment) for _ in args):
+    if not all(isinstance(_, experiment.Experiment) for _ in args):
         raise ValueError('Input must be Experiment instances.')
     cmaps = {}  # name, experiment pairs
     specs = _parse_speclists(spec, prefer_single_subplot=False)
@@ -1877,7 +1877,7 @@ def xsections(
     Parameters
     ----------
     *args : `xarray.Dataset`
-        The dataset(s). Often this is an expanded `load.Experiment`.
+        The dataset(s). Often this is an expanded `experiment.Experiment`.
     mode : {'yz', 'ty', 'cy', 'ky', 'ck'}
         The plotting cross-section mode. Each character stands for a dimension.
     contourf, contour : str, optional
