@@ -16,11 +16,10 @@ in the experiment name. Much simpler that way.
 """
 import copy
 import functools
-import glob
 import itertools
 import numbers
-import os
 import re
+from pathlib import Path
 
 import numpy as np
 import xarray as xr
@@ -29,9 +28,10 @@ from icecream import ic  # noqa: F401
 
 from .data import load_gfdl_file
 from . import _make_stopwatch, _warn_simple
+from . import physics  # noqa: F401
 
-SCRATCH = '/mdata1/ldavis'  # TODO: iterate through possible scratch dirs
-STORAGE = os.path.expanduser('~/data/timescales')
+SCRATCH = Path('/mdata1/ldavis')  # TODO: iterate through possible scratch dirs
+STORAGE = Path('~/data/timescales').expanduser()
 
 REGEX_RESO = re.compile(r'\At[0-9]+l[0-9]+[spe]\Z')
 REGEX_SCHEME = re.compile(r'\A(hs|pk|pkmod)[12][cln]*\Z')
@@ -58,17 +58,24 @@ def _filter_args(*args):
 
 def _joint_name(*args):
     """
-    Return suitable string representation for the input experiments.
+    Return suitable string representation for the input experiments. This works
+    for both dataset and experiment input.
     """
-    exps = tuple(
-        exp for exps in args
-        for exp in ((exps,) if isinstance(exps, Experiment) else exps)
-    )
-    return '_'.join((
-        '-'.join(sorted({scheme.item() for exp in exps for scheme in exp.schemes})),
-        '-'.join(sorted({reso.item() for exp in exps for reso in exp.resos})),
-        '-'.join(sorted({name for exp in exps for name in exp.names})),
-    )).rstrip('_')
+    if all(isinstance(_, xr.Dataset) for _ in args):
+        parts = (
+            '-'.join(sorted(set(ds.scheme.item() for ds in args))),
+            '-'.join(sorted(set(ds.reso.item() for ds in args))),
+            '-'.join(sorted(set(da.name for ds in args for da in ds.climo.parameters)))
+        )
+    elif all(isinstance(_, Experiment) for _ in args):
+        parts = (
+            '-'.join(sorted(set(scheme.item() for exp in args for scheme in exp.schemes))),  # noqa: E501
+            '-'.join(sorted(set(reso.item() for exp in args for reso in exp.resos))),
+            '-'.join(sorted(set(name for exp in args for name in exp.names))),
+        )
+    else:
+        raise TypeError(f'Unexpected input {args!r}.')
+    return '_'.join(parts).strip('_')
 
 
 class Experiment(object):
@@ -80,6 +87,9 @@ class Experiment(object):
     def __str__(self):
         return _joint_name(self)
 
+    def __hash__(self):
+        return hash(_joint_name(self))
+
     def __repr__(self):
         pairs = {
             'scheme': tuple(_ for _ in self.schemes),
@@ -88,6 +98,13 @@ class Experiment(object):
         }
         string = ', '.join(f'{key}={value!r}' for key, value in pairs.items())
         return f'Experiment({string})'
+
+    def __eq__(self, other):
+        if isinstance(other, Experiment):
+            other = _joint_name(other)
+        elif not isinstance(other, str):
+            raise ValueError(f'Cannot compare object of type {type(other)}.')
+        return _joint_name(self) == other
 
     def __init__(self, *args, verbose=True, **params):
         """
@@ -136,22 +153,23 @@ class Experiment(object):
             # Find existing paths including 'reference' experiments
             globs = tuple(
                 (
-                    f'{STORAGE}/{scheme}_{reso}_' + '_'.join(
+                    f'{scheme}_{reso}_' + '_'.join(
                         da.name + (number if ~np.isfinite(da) else f'{da.item():08.3f}')
                         for da in param
                         if da != da.climo.cfvariable.reference
                         and (i == 1 or np.isfinite(da))
-                    )
-                ).rstrip('_') for i in range(2)  # i == 0 is for 'reference' experiments
+                    ) + suffix
+                ).rstrip('_')
+                for i in range(2)  # i == 0 is for 'reference' experiments
+                for suffix in ('', 'c')  # non-continuation and continuation
             )
             paths = sorted(  # will filter from cold-warm start versions when loading
-                path for iglob in globs for suffix in ('', 'c')
-                for path in glob.glob(iglob + suffix)
+                path for glob in globs for path in STORAGE.glob(glob)
             )
             # Get available parameters from paths
             iparams_found = {k: [] for k in params}
             for path in paths:
-                jparams_found = {k: v for k, v in re.findall(regex, path)}
+                jparams_found = {k: v for k, v in re.findall(regex, path.name)}
                 for k in params:
                     if k in jparams_found:
                         iparams_found[k].append(float(jparams_found[k]))
@@ -214,6 +232,7 @@ class Experiment(object):
         name = self.name
         if not data:
             _warn_simple('Data not yet loaded.')
+            raise Exception
             return 0
         elif name in data.dims:
             return data.sizes[name]
@@ -290,7 +309,7 @@ class Experiment(object):
             The base file prefix. Added to "special" files containing e.g. EOF data.
         day1, day2 : int, optional
             The starting and ending days or glob patterns for the file.
-        hami : {'ave', 'nh', 'sh', 'globe'}
+        hemi : {'ave', 'nh', 'sh', 'globe'}
             The hemisphere specification.
         teq : bool, optional
             Add a "dummy" experiment where temp is at equilibrium everywhere.
@@ -340,8 +359,8 @@ class Experiment(object):
         for idx, expname in np.ndenumerate(expnames):
             # Locate data, preferring non-continuation versions
             for parts in itertools.product((STORAGE, SCRATCH), (expname, expname + 'c'), ('', 'netcdf')):  # noqa: E501
-                dir = os.path.join(*parts)
-                if files := sorted(glob.glob(os.path.join(dir, pattern))):
+                path = Path(*parts)
+                if files := sorted(path.glob(pattern)):
                     break
             if not files:
                 raise FileNotFoundError(f'File(s) {pattern!r} not found for experiment {expname!r}.')  # noqa: E501
@@ -351,7 +370,7 @@ class Experiment(object):
                 files = files[-1:]
             dataset = load_gfdl_file(*files, timer=timer, **kwargs)
             if verbose:
-                days = tuple(int(d) for f in files for d in re.findall(r'\bd([0-9]+)', f))  # noqa: E501
+                days = tuple(int(d) for f in files for d in re.findall(r'\bd([0-9]+)', f.name))  # noqa: E501
                 print(f'Loaded {expname} (days {min(days)}-{max(days)})')
 
             # Fix variables
@@ -364,7 +383,7 @@ class Experiment(object):
                         dataset = dataset.rename({name: new})
 
             # Add base data to datasets without 'basic' quantites
-            files = sorted(glob.glob(os.path.join(dir, pattern_base)))
+            files = sorted(path.glob(pattern_base))
             if 'u' in dataset:
                 pass
             elif not files:
@@ -380,7 +399,7 @@ class Experiment(object):
             # Add forcing data to dataset
             # TODO: Add ndamp_mean, ndamp_anom, etc. Problem is just some older
             # experiments do not have this data.
-            file_constants = os.path.join(dir, 'constants.nc')
+            file_constants = path / 'constants.nc'
             if file_constants not in files:
                 dataset_constants = load_gfdl_file(file_constants, **kwargs)
                 for var in ('teq', 'forcing', 'ndamp', 'rdamp'):
@@ -398,13 +417,17 @@ class Experiment(object):
             datasets[idx] = dataset
 
         # Merge with combine_nested
+        # NOTE: Need join='outer' rather than join='exact' when merging datasets
+        # with time dimension and different simulation lengths. But need other
+        # approach for handling different spatial resolutions (maybe interpolate
+        # to the highest resolution of all member datasets?).
         dataset = xr.combine_nested(
             datasets.tolist(),  # convert object array containing datasets
             concat_dim=tuple(expnames.dims),
             coords='minimal',
             compat='override',  # compatibility of dimensions
             combine_attrs='override',
-            join='exact',
+            join='outer',  # fill NaNs where coordinates mismatch
         )
         stopwatch('Concatenate')
 
@@ -486,6 +509,10 @@ class Experiment(object):
     @property
     def ireference_loaded(self):
         return self.parameters_loaded.values.tolist().index(self.reference)
+
+    @property
+    def parameter(self):  # alias for 'parameters' for consistency with ClimoAccessor
+        return self.parameters
 
     @property
     def parameters(self):  # DataArray for first param
@@ -578,6 +605,8 @@ class ExperimentCollection(object):
 
         # Return the subgroup
         # NOTE: Important not to create new Experiment so do not lose data
+        seen = set()
+        exps = [exp for exp in exps if exp not in seen and not seen.add(exp)]
         c = copy.copy(self)
         c._experiments = exps
         c._schemes = tuple(_ for _ in c._schemes if any(_ in exp.schemes for exp in exps))  # noqa: E501

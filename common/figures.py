@@ -19,6 +19,9 @@ from . import experiment
 from climopy import vreg, ureg, const  # noqa: F401
 
 pplt.rc.autoformat = False
+pplt.rc['axes.inbounds'] = True  # suppress warning message
+pplt.rc['cmap.inbounds'] = False  # suppress warning message
+pplt.rc['mathtext.default'] = 'regular'
 pplt.rc['subplots.refwidth'] = 1.8
 pplt.rc['subplots.panelpad'] = 0.8
 
@@ -151,33 +154,6 @@ def _get_item(name, specs, idx=2):
         return items[0]
     else:
         raise ValueError(f'Ambiguous or conflicting {name!r} items {items!r}.')
-
-
-def _get_lims(lim, coords):
-    """
-    Sanitize axis limits.
-    """
-    # Sanitize input limits
-    if lim is None:
-        return lim
-    lo, hi = lim
-    if lo is None:
-        lo = -np.inf
-    if hi is None:
-        hi = np.inf
-    reverse = lo > hi
-    if reverse:
-        lo, hi = hi, lo  # coordinates of *data* are always stores increasing
-    override = coords.dims[0] == 'lat' and np.sum(coords < 0) == 1
-    if override:
-        lo = np.min(coords) - 1e-10  # do not remove this
-    lim_new = [coords.min().item(), coords.max().item()]
-    if override:
-        lim_new[0] = 0
-    if reverse:
-        lim_new = (lim_new[1], lim_new[0])
-    lim[:] = lim_new  # fix old limits
-    return slice(lo, hi)
 
 
 def _get_scalar_data(exp, name, standardize=True, **kwargs):
@@ -735,7 +711,7 @@ def _subplot_per_simulation(
         for ax, data, title in zip(iaxs, args, titles):
             if title is None:
                 ntau0 = None
-                param = data.climo.parameter
+                param = sorted(data.climo.parameters, key=lambda da: da.name)[0]
                 suffix = ''
                 if show_hs94 and param == param.climo.reference:
                     suffix = ' (HS94)'
@@ -864,6 +840,7 @@ def curves(
 
     # Iterate through variables and experiments
     for i, (j, k) in enumerate(itertools.product(range(nvars), range(nsims))):
+        # Get axes and specs
         iax = ax = axs[i]  # order is F or C depending on 'vertical' setting
         data = args[k]
         ispecs = specs[j]
@@ -877,8 +854,7 @@ def curves(
         for l, (name, kwvar, kwopts, kwplot, kwaxes) in enumerate(ispecs):
             kwplot = kwplot.copy()
             kwplot['zorder'] = 2 - 0.5 * (l + 1) / len(ispecs)
-            lim = kwaxes.get('ylim' if transpose else 'xlim', None)
-            y, err = _get_1d_data(data, name, lim=lim, **kwvar)
+            y, err = _get_1d_data(data, name, **kwvar)
             x = y.coords[y.dims[0]]
             xy = (y, x) if transpose else (x, y)
             lines.append((*xy, err, kwaxes, kwplot, kwopts))
@@ -899,7 +875,7 @@ def curves(
         # Iterate through lines
         hs = []
         for idx, (x, y, err, kwaxes, kwplot, kwopts) in zip(idxs, lines):
-            # Plot the line data, possibly on alternate axes
+            # Get the color and axes
             # TODO: Standardize method for determining whether we use alternate y-axes
             # between curves() and series(). Below is simpler than series() method.
             kw = next(icycle).copy()
@@ -912,18 +888,11 @@ def curves(
                         iax = ax._alt_child
                     else:
                         iax = ax._alt_child = ax.altx() if transpose else ax.alty()
-            ihs = iax.plot(x, y, **kw)
-            hs.append(ihs[0])
-            if err is not None:
-                iax.errorbar(
-                    x, y, fmt='none', ecolor='k',
-                    capsize=4, capthick=1, elinewidth=1, clip_on=False,
-                    **{'xerr' if transpose else 'yerr': err},
-                )
 
-            # Format axes
+            # Format the axes
+            # NOTE: Must do this first to trigger 'inbounds' restriction
             xs, ys = 'yx' if transpose else 'xy'
-            kw = {
+            kwfmt = {
                 # xs + 'label': x.climo.long_label,
                 xs + 'label': x.climo.short_label,
                 xs + 'scale': x.climo.axis_scale,
@@ -939,7 +908,18 @@ def curves(
                 **kwaxes,
                 **kwargs,
             }
-            iax.format(**kw)
+            iax.format(**kwfmt)
+
+            # Plot the line data
+            # NOTE: Also permit error data
+            ihs = iax.plot(x, y, **kw)
+            hs.append(ihs[0])
+            if err is not None:
+                iax.errorbar(
+                    x, y, fmt='none', ecolor='k',
+                    capsize=4, capthick=1, elinewidth=1, clip_on=False,
+                    **{'xerr' if transpose else 'yerr': err},
+                )
 
         # Add extra lines
         for ax in {ax, iax}:
@@ -1345,7 +1325,8 @@ def parametric(
         if as_param and ntau0 is not None:
             params_alt = ntau0.climo.to_variable(as_param, standardize=True)
         kwargs = {
-            'locator': params.climo.magnitude,  # tick on exact locations
+            # 'locator': params.climo.magnitude,  # tick on exact locations
+            'locator': pplt.FixedLocator(params.climo.magnitude),
             'minorlocator': 'null',
             'width': cwidth,
             'length': clength,
@@ -1370,6 +1351,7 @@ def parametric(
         )
 
         # Add secondary colorbar
+        # TODO: Fix issue with DiscreteLocator removing fixed labels
         cbalt = None
         if params_alt is not None:
             def _reposition(self, *args, cax=cb.ax, **kwargs):
@@ -1622,6 +1604,8 @@ def series(
             xminorlocator = xminorlocator or 'logminor'
         if params.scheme == 'hs2':  # WARNING: kludge for uniform damping scheme
             xlabel = re.sub('reference ', '', xlabel)
+        if xminorlocator == 'logminor':
+            xminorlocator = pplt.LogLocator(subs=pplt.arange(1, 9), numdecs=10)
         kw = {
             'xgrid': False,
             'xlim': (params.min().item(), params.max().item()),
@@ -1653,15 +1637,22 @@ def series(
             xax.format(**kw)
 
         # Hide duplicate *x* labels when subplot is in top/bottom of column
-        nrow, _, _, _ = ax.get_subplotspec()._get_subplot_geometry()
-        row1, row2, _, _ = ax.get_subplotspec()._get_subplot_rows_columns()
+        # NOTE: Account for older proplot versions here
+        ss = ax.get_subplotspec()
+        if hasattr(ss, '_get_subplot_geometry'):
+            nrow, _, _, _ = ss._get_subplot_geometry()
+            row1, row2, _, _ = ss._get_subplot_rows_columns()
+            row1, row2 = row1 + 1, row2 + 1  # one indexed
+        else:
+            nrow, _, _, _ = ss._get_geometry()
+            row1, row2, _, _ = ss._get_rows_columns()
         for iax in (ax, xax):
-            if not iax:
+            if not iax or nrow < 2:
                 continue
             axis = iax.xaxis
             if (
-                nrow > 1 and row1 == 0 and axis.get_label_position() == 'bottom'
-                or nrow > 1 and row2 >= nrow - 1 and axis.get_label_position() == 'top'
+                row1 < nrow and axis.get_label_position() == 'bottom'
+                or row2 > 1 and axis.get_label_position() == 'top'
             ):
                 axis.set_major_locator(pplt.Locator('null'))
                 axis.set_minor_locator(pplt.Locator('null'))
@@ -1760,8 +1751,7 @@ def stacks(
             kwplot = kwplot.copy()
             kwplot.pop('cmap', None)
             data = exp[m]
-            lim = kwaxes.get('ylim' if transpose else 'xlim', None)
-            y, err = _get_1d_data(data, name, lim=lim, **kwvar)
+            y, err = _get_1d_data(data, name, **kwvar)
             x = y.coords[y.dims[0]]
 
             # Plot experiments from top to bottom
@@ -1936,6 +1926,7 @@ def xsections(
     plots = _dict_of_lists()
     for i, (j, k) in enumerate(itertools.product(range(nvars), range(nsims))):
         # Axes properties and coordinates
+        # NOTE: Must set x limits first to trigger inbounds limitation
         ax = axs[i]
         data = args[k]
         icontourfs = contourfs[j]
@@ -1945,10 +1936,7 @@ def xsections(
         dims, kwfmt = _get_xyprops(data, mode=mode, **kwargs)
         xlim = kwfmt.pop('xlim', None)
         ylim = kwfmt.pop('ylim', None)
-        if xlim is not None:
-            ax.format(xlim=xlim)  # then auto-inbounds
-        if ylim is not None:
-            ax.format(ylim=ylim)  # then auto-inbounds
+        ax.format(xlim=xlim, ylim=ylim)
 
         # Normalized contours when levels is an integer
         # NOTE: For now only draw colorbar for *first* contourf in
@@ -2123,7 +2111,10 @@ def xsections(
                 x, y = (args[0].coords[dim] for dim in args[0].dims)
             else:
                 x = y = None  # not restricted to in-bounds
-            vmin, vmax, _ = ax._parse_level_lim(x, y, *args)
+            if hasattr(ax, '_parse_level_lim'):
+                vmin, vmax, _ = ax._parse_level_lim(x, y, *args)
+            else:
+                vmin, vmax, _ = ax._parse_vlim(x, y, *args)
         else:
             vmin = vmax = None
 
@@ -2137,9 +2128,9 @@ def xsections(
             cbar_kw = colorbar_kw.copy()
             for key in ('creverse', 'clocator', 'cminorlocator', 'cformatter'):
                 cbar_kw.setdefault(key[1:], kwargs.pop(key, None))
-            if vmin is not None:
+            if vmin is not None and kwargs.get('levels') is None:
                 kwargs.setdefault('vmin', vmin)
-            if vmax is not None:
+            if vmax is not None and kwargs.get('levels') is None:
                 kwargs.setdefault('vmax', vmax)
             h = getattr(ax, funcname)(*args, **kwargs)
 
@@ -2228,6 +2219,7 @@ def xsections(
     elif hs:
         center = axs.shape[1] // 2
         axs_leg = axs[-1, :] if vertical else axs[:, center]
+        axs_leg = axs[1::3]  # TODO: remove kludge
         for ax, ihs in hs.items():
             if ax not in axs_leg:
                 continue

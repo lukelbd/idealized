@@ -3,12 +3,12 @@
 Register CF variables, transformations, and derivations in climopy.
 Lightly leverages a few pre-defined climopy variables.
 """
+# WARNING: keep_attrs fails for unary operations -data, +data, and abs(data)
 # NOTE: Important question: Why not just add attributes in the conversions
 # below and forego the separate CFVariable interface? Because do not want to
 # embed metadata definitions in a *derivation*, e.g. if we are loading the
 # data externally instead of calculating it. Extremely convenient to have a
 # consolidated, separate database from which "attributes" can be retrieved.
-# WARNING: keep_attrs fails for unary operations -data, +data, and abs(data)
 import re
 import warnings
 
@@ -84,12 +84,13 @@ with warnings.catch_warnings():
     # vreg.define('f', 'frequency', 'days')  # i.e. temporal wavenumber
 
     # Basic state quantities
-    vreg.define('u', 'zonal wind', 'm / s', 'zonal wind', parents='momentum', aliases='u')  # noqa: E501
-    vreg.define('v', 'meridional wind', 'm / s', 'meridional wind', parents='momentum', aliases='v')  # noqa: E501
-    vreg.define('t', 'temperature', 'K', 'temperature', parents='energy', aliases='ta')
-    vreg.define('z', 'geopotential height', 'km', 'geopotential height', parents='energy')  # noqa: E501
-    vreg.define('w', 'vertical wind', 'cm / s', 'vertical wind', parents='momentum')
+    vreg.define('u', 'zonal wind', 'm / s', parents='momentum')  # noqa: E501
+    vreg.define('v', 'meridional wind', 'm / s', parents='momentum')  # noqa: E501
+    vreg.define('t', 'air temperature', 'K', parents='energy')
+    vreg.define('z', 'geopotential height', 'km', parents='energy')  # noqa: E501
+    vreg.define('w', 'vertical wind', 'cm / s', parents='momentum')
     vreg.define('q', 'specific humidity', 'g / kg')
+    vreg.define('rh', 'relative humidity', '%')
     vreg.define('alb', 'surface albedo', '%')
     vreg.define('ts', 'surface temperature', 'K', parents='t')
     vreg.define('pt', 'potential temperature', 'K', parents='t')
@@ -117,7 +118,7 @@ with warnings.catch_warnings():
     vreg.define('omegae', long_prefix='eddy-induced', parents='omega')
     vreg.define('omegaresid', long_prefix='residual', parents='omega')
 
-    # Miscellaneous thermodynamic budget terms
+    # Thermodynamic budget terms
     # Very similar but these are all thermal so unintegrated units are K / s
     vreg.define('heating', 'heating', 'K / day', 'heating', parents='energy_flux')
     vreg.define('cooling', 'cooling', 'K / day', 'cooling', parents='energy_flux')
@@ -142,7 +143,7 @@ with warnings.catch_warnings():
     vreg.define('diss', long_prefix='dissipative', short_name='dissipation', parents='heating')  # noqa: E501
     vreg.define('forcing', 'forcing perturbation', reference=0, symbol='Q', parents='heating')  # noqa: E501
     vreg.define('iforcing', 'negative forcing perturbation', reference=0, symbol='Q', parents='cooling')  # noqa: E501
-    vreg.define('rforcing', 'residual diabatic forcing', parents='heating')
+    vreg.define('rforcing', 'net diabatic heating', parents='heating')
 
     # Momentum budget terms
     # NOTE: acceleration already defined
@@ -246,15 +247,13 @@ with warnings.catch_warnings():
     vreg.define('qgepy', 'meridional QG EP flux', parents='epy')
     vreg.define('qgepz', 'vertical QG EP flux', parents='epz')
 
-    # Potential vorticity fluxes
+    # Ertel and QG potential vorticity fluxes
     vreg.define('pvf', 'potential vorticity flux', 'PVU m / s')
     vreg.define('mpvf', long_prefix='mean', parents='pvf')
     vreg.define('epvf', long_prefix='eddy', parents='pvf')
     vreg.define('cpvf', short_suffix='convergence', standard_units='VU / day', parents='pvf')  # noqa: E501
     vreg.define('cmpvf', long_prefix='mean', parents='cpvf')
     vreg.define('cepvf', long_prefix='eddy', parents='cpvf')
-
-    # Quasi-geostrophic potential vorticity fluxes
     vreg.define('qgpvf', 'quasi-geostrophic potential vorticity flux', 'VU m / s', parents='acceleration')  # noqa: E501
     vreg.define('mqgpvf', long_prefix='mean', parents='qgpvf')
     vreg.define('eqgpvf', long_prefix='eddy', parents='qgpvf')
@@ -329,7 +328,7 @@ with warnings.catch_warnings():
     vreg.define('ldisp', 'displacement scale', symbol='L_{disp}', parents='scale')
     vreg.define('ls', 'stationary wavelength', symbol='L_s', parents='scale')
 
-    # Diffusivity
+    # Diffusivity parameters
     vreg.define('diffusivity', 'diffusivity', 'km^2 / s')
     vreg.define('t_diffusivity', 'thermal diffusivity', parents='diffusivity')
     vreg.define('pv_diffusivity', 'PV diffusivity', parents='diffusivity')
@@ -345,20 +344,19 @@ with warnings.catch_warnings():
     vreg.define('itdt_denominator', r'$\tau$ contribution', parents='itdt')
     # vreg.define('itdt_denominator', r'$\tau_t$ contribution', parents='itdt')
 
-    # Basic model parameters
-    vreg.define('scheme', 'forcing scheme', '')  # string value
-    vreg.define('reso', 'resolution', '')  # string value
-
-    # Temperature parameters
-    vreg.define('tgrad', 'equilibrium temperature difference', 'K', colormap='stellar', symbol=r'\Delta_y', reference=60, axis_reverse=True, parents='t')  # noqa: E501
-    vreg.define('tmean', 'average equilibrium surface temperature', 'K', symbol=r'\overline{T}', reference=300, parents='t')  # noqa: E501
-    vreg.define('tshift', 'equilibrium temperature gradient shift', '', symbol=r'\gamma', reference=1)  # noqa: E501
-
-    # Damping parameters
+    # Dynamical core parameters
+    # NOTE: Need to round to nearest 5 for the sake of the parametric plot.
+    # Otherwise would have really weird values. Not important at all.
     # NOTE: Want to compare everything against increasing timescale or sensitivity. In
     # general this means experiments with 'strong' circulations on left and with 'weak'
     # circulations on right. If parameter order is opposite must set reverse to True.
     fmt = ('sigfig', 2, True, 5)
+    # fmt = ('sigfig', 2)
+    vreg.define('scheme', 'forcing scheme', '')  # string value
+    vreg.define('reso', 'resolution', '')  # string value
+    vreg.define('tgrad', 'equilibrium temperature difference', 'K', colormap='stellar', symbol=r'\Delta_y', reference=60, axis_reverse=True, parents='t')  # noqa: E501
+    vreg.define('tmean', 'average equilibrium surface temperature', 'K', symbol=r'\overline{T}', reference=300, parents='t')  # noqa: E501
+    vreg.define('tshift', 'equilibrium temperature gradient shift', '', symbol=r'\gamma', reference=1)  # noqa: E501
     vreg.define('damp', 'damping rate', standard_units='day^-1', scalar_formatter=fmt)
     vreg.define('ndamp', 'thermal damping coefficient', parents='damp')
     vreg.define('ndamp_mean', long_prefix='mean', parents='ndamp')
@@ -367,16 +365,18 @@ with warnings.catch_warnings():
     vreg.define('rdamp_mean', long_prefix='mean', parents='rdamp')
     vreg.define('rdamp_anom', long_prefix='eddy', parents='rdamp')
     vreg.define('sdamp', 'sponge damping coefficient', parents='damp')
-    vreg.define('tau', 'damping timescale', 'days', reference=40, colormap='dusk', axis_scale='log', scalar_formatter=fmt)  # noqa: E501
-    vreg.define('rtau', 'frictional damping timescale', symbol=r'\tau_{max}', parents='tau')  # noqa: E501
-    vreg.define('ntau', 'maximum damping timescale', symbol=r'\tau_{max}', parents='tau')  # noqa: E501
-    vreg.define('ntau0', 'reference damping timescale', symbol=r'\tau_{0}', parents='tau')  # noqa: E501
-    vreg.define('ntaumean', 'zonal-mean damping timescale', symbol=r'\overline{\tau}_{max}', parents='ntau')  # noqa: E501
-    vreg.define('ntauanom', 'zonal-anomaly damping timescale', symbol=r'\tau^*_{max}', parents='ntau')  # noqa: E501
-    vreg.define('ntaueff', 'effective damping timescale', symbol=r'1\,/\,\overline{1\,/\,\tau}', parents='ntau')  # noqa: E501
-
-    # Forcing parameters
-    fmt = ('sigfig', 2, True, 5)
+    # vreg.define('tau', 'damping timescale', 'days', colormap='dusk', axis_scale='log', scalar_formatter=fmt)  # noqa: E501
+    vreg.define('tau', 'relaxation timescale', 'days', colormap='dusk', axis_scale='log', scalar_formatter=fmt)  # noqa: E501
+    vreg.define('rtau', long_prefix='mechanical', reference=1, symbol=r'\tau_{min}', parents='tau')  # noqa: E501
+    vreg.define('ntau', long_prefix='maximum', reference=40, symbol=r'\tau_{max}', parents='tau')  # noqa: E501
+    vreg.define('ntau0', long_prefix='reference', symbol=r'\tau_{0}', parents='tau')  # noqa: E501
+    vreg.define('ntaumean', long_prefix='zonal-mean', symbol=r'\overline{\tau}_{max}', parents='ntau')  # noqa: E501
+    vreg.define('ntauanom', long_prefix='zonal-anomaly', symbol=r'\tau^*_{max}', parents='ntau')  # noqa: E501
+    # vreg.define('rtau', long_prefix='minimum mechanical', reference=1, symbol=r'\tau_{max}', parents='tau')  # noqa: E501
+    # vreg.define('ntau', long_prefix='maximum thermal', reference=40, symbol=r'\tau_{max}', parents='tau')  # noqa: E501
+    # vreg.define('ntau0', long_prefix='reference thermal', symbol=r'\tau_{0}', parents='tau')  # noqa: E501
+    # vreg.define('ntaumean', long_prefix='zonal-mean thermal', symbol=r'\overline{\tau}_{max}', parents='ntau')  # noqa: E501
+    # vreg.define('ntauanom', long_prefix='zonal-anomaly thermal', symbol=r'\tau^*_{max}', parents='ntau')  # noqa: E501
     vreg.define('qglobal', 'globally uniform forcing', parents='forcing')
     vreg.define('qrealistic', 'realistic forcing', parents='forcing')
     vreg.define('qsurface', 'boundary layer forcing', parents='forcing')
@@ -384,26 +384,21 @@ with warnings.catch_warnings():
     vreg.define('qvortex', 'polar vortex forcing', parents='forcing')
     vreg.define('qarctic', 'polar surface forcing', parents='forcing')
 
-    # Climate feedbacks
-    fmt = ('sigfig', 2, True, 5)
-    vreg.define('feedback', 'feedback parameter', 'W m^-2 / K', colormap='lajolla', symbol=r'\lambda')  # noqa: E501
-    vreg.define('cfp', long_prefix='climate', parents='feedback')  # empriical
-    vreg.define('rfp', long_prefix='relaxation', standard_units='W m-2 100hPa-1 / K', symbol=r'\lambda_{\tau}', parents='feedback')  # noqa: E501
-    vreg.define('rfp0', long_prefix='reference relaxation', symbol=r'\lambda_{\tau}', parents='feedback')  # noqa: E501
-    # vreg.define('rfp', long_prefix='local relaxation', standard_units='W m-2 100hPa-1 / K', symbol=r'\lambda(\tau)', parents='feedback')  # noqa: E501
-    # vreg.define('rfp0', long_prefix='global relaxation', symbol=r'\lambda_{\tau_0}', parents='feedback')  # noqa: E501
-
-    # Climate sensitivity
+    # Climate feedbacks and sensitivity
     # NOTE: Wikipedia climate sensitivity page says there is not yet a consensus on
     # whether 'climate sensitivity parameter' can be called 'climate sensitivity'.
     # However IPCC and Hartmann's book both use 'parameter', so be conservative.
-    fmt = ('sigfig', 2, True, 5)
+    vreg.define('feedback', 'feedback parameter', 'W m^-2 / K', colormap='lajolla', symbol=r'\lambda')  # noqa: E501
+    vreg.define('cfp', long_prefix='climate', parents='feedback')  # empriical
+    vreg.define('rfp', long_prefix='relaxation climate', standard_units='W m-2 100hPa-1 / K', symbol=r'\lambda_{\tau}', parents='feedback')  # noqa: E501
+    # vreg.define('rfp', long_prefix='local relaxation', standard_units='W m-2 100hPa-1 / K', symbol=r'\lambda(\tau)', parents='feedback')  # noqa: E501
     vreg.define('sensitivity', 'sensitivity', colormap='lajolla', axis_scale='log', scalar_formatter=fmt)  # noqa: E501
     vreg.define('cs', 'climate sensitivity', 'K', 'temperature', symbol=r'\Delta T', parents='sensitivity')  # noqa: E501
     vreg.define('css', long_prefix='near-surface', parents='cs')
     vreg.define('csp', 'climate sensitivity parameter', 'K / W m^-2', symbol='s', parents='sensitivity')  # noqa: E501
     vreg.define('rs', long_prefix='relaxation', symbol=r'\Delta T_{\tau}', parents='cs')  # noqa: E501
     vreg.define('rsp', 'relaxation sensitivity parameter', symbol=r's_{\tau}', parents='csp')  # noqa: E501
+    # vreg.define('rsp', long_prefix='relaxation', symbol=r's_{\tau}', parents='csp')  # noqa: E501
     vreg.define('rss', long_prefix='near-surface', parents='rs')
     vreg.define('rs2xco2', long_prefix=r'2$\times$CO$_2$', parents='rs')
     vreg.define('rs4xco2', long_prefix=r'4$\times$CO$_2$', parents='rs')
