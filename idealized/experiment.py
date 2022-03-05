@@ -26,7 +26,6 @@ import xarray as xr
 from climopy import vreg
 from icecream import ic  # noqa: F401
 
-from .data import load_gfdl_file
 from . import _make_stopwatch, _warn_simple
 from . import physics  # noqa: F401
 
@@ -35,6 +34,14 @@ STORAGE = Path('~/data/timescales').expanduser()
 
 REGEX_RESO = re.compile(r'\At[0-9]+l[0-9]+[spe]\Z')
 REGEX_SCHEME = re.compile(r'\A(hs|pk|pkmod)[12][cln]*\Z')
+
+VARS_INVERT = (
+    'v', 'vdt', 'emf', 'ehf', 'egf', 'pv', 'slope'
+)
+ATTR_OVERRIDES = {
+    'u': {'long_name': 'zonal wind'},
+    'v': {'long_name': 'meridional wind'},
+}
 
 
 def _filter_args(*args):
@@ -76,6 +83,118 @@ def _joint_name(*args):
     else:
         raise TypeError(f'Unexpected input {args!r}.')
     return '_'.join(parts).strip('_')
+
+
+def load_file(
+    *files, hemi='avg', lat=None, plev=None, add=None, days=None, timer=False, variables=None,  # noqa: E501
+):
+    """
+    Load and standardize the dataset and apply `pint` units.
+
+    Parameters
+    ----------
+    *files : path-like
+        The file name(s).
+    hemi : {'globe', 'avg', 'nh', 'sh'}
+        The region used for combining hemispheric data.
+    lat, plev : str, optional
+        Selections to reduce size of spectral data.
+    add : str, optional
+        Add across these dimensions to reduce size of spectral data.
+    days : int, optional
+        Take averages over this many consecutive days.
+    timer : bool, optional
+        Time operations.
+    variables : list of str, optional
+        Use this to filter variables in the returned dataset.
+    """
+    # Load data from scratch or storage, may raise FileNotFoundError
+    # TODO: Add date bounds for sepctral data filenames.
+    # NOTE: This replaces yzload and xyload functions, since it searches
+    # scratch along with storage
+    stopwatch = _make_stopwatch(timer=timer)
+    if len(files) == 1:
+        dataset = xr.open_dataset(*files, decode_times=False)
+    else:
+        dataset = xr.open_mfdataset(files, combine='by_coords', decode_times=False)
+    if isinstance(variables, str):
+        variables = [variables]
+    if variables:  # truncate variables
+        dataset = dataset[variables]
+
+    # Standardize coordinates
+    # NOTE: This also renames old vertical coordinate conventions to 'lev'
+    dataset = dataset.load()  # otherwise add_scalar_coords fails
+    stopwatch('Load')
+    dataset = dataset.climo.standardize_coords()
+    stopwatch('Standardize')
+    dataset = dataset.climo.add_scalar_coords()
+    stopwatch('Scalar')
+
+    # Select hemisphere.
+    # Do this first in case it reduces amount of data for below operations
+    # NOTE: Don't do enforce_global here to boost speed
+    if hemi in ('nh', 'sh', 'avg'):
+        if 'lat' in dataset.dims:  # select hemisphere
+            dataset = dataset.climo.sel_hemisphere(hemi, invert=VARS_INVERT)
+            stopwatch(f'Hemisphere {hemi}')
+    elif hemi != 'globe':
+        raise ValueError(f'Invalid {hemi=}.')
+
+    # Sum over dimensions or make selections for spectral data
+    # NOTE: Critical to drop extra dimensions when we make selections, or will have
+    # issues combining spectral data with pressure data.
+    # TODO: Have the Variable naming class detect selected pressure levels and
+    # latitudes here... or just remove this block and take the efficiency hit,
+    # probably better that way.
+    if add is not None:
+        dataset = dataset.sum(dim=add, keep_attrs=True)
+    if lat is not None:
+        dataset = dataset.sel(lat=lat, method='nearest', drop=True)
+    if plev is not None:
+        dataset = dataset.sel(plev=plev, method='nearest', drop=True)
+
+    # Average over blocks of time to reduce resolution
+    if dataset.sizes.get('time', 1) > 1:
+        dataset = dataset.sortby('time')  # sometimes is messed up
+    if 'time' in dataset.dims and days is not None:
+        dataset = dataset.climo.coarsen(time=days).mean()
+
+    # Update cfvariable-relevent attributes
+    for name, attrs in ATTR_OVERRIDES.items():
+        if name in dataset:
+            dataset[name].attrs.update(attrs)
+
+    # Repair Lorenz energy terms and stopwatch dividing by g. Also fix missing units.
+    # Q: Why do this? Shouldn't vertical integral always be per 100hPa?
+    # A: Makes more sense when comparing with e.g. thermodynamic budget. Put
+    # 100hPa in denominator only when displaying these terms in isolation.
+    if 'k' in dataset.coords:
+        k = dataset.coords['k']
+        if np.all(k.data < 1):
+            k = k / (k[1] - k[0])  # not sure how this happened
+            dataset = dataset.climo.replace_coords(k=k)
+    for name, da in dataset.items():
+        if 'units' not in da.attrs:
+            if name == 'z':
+                da.attrs['units'] = 'm'
+            elif name == 'egf':
+                da.attrs['units'] = 'm2 / s'
+            elif not da.climo._is_bounds:
+                raise RuntimeError(f'Missing units for variable {name!r}.')
+        if name in vreg.lorenz and da.attrs['units'] in ('J/m2 Pa', 'W/m2 Pa'):
+            da *= 9.80665
+            da.attrs['units'] = da.attrs['units'].replace('m2 Pa', 'kg')
+    stopwatch('Fixes')
+
+    # Upsample to float64 for computational accuracy
+    # NOTE: This was only recently fixed. Requires xarray dev branch.
+    dataset = dataset.astype(np.float64, keep_attrs=True)
+    stopwatch('Upsample')
+    dataset.attrs['filename'] = ','.join(map(str, files))  # convert pathlib
+    if 'history' in dataset.attrs:
+        del dataset.attrs['history']  # not useful
+    return dataset
 
 
 class Experiment(object):
@@ -324,7 +443,7 @@ class Experiment(object):
         **params_drop : list of float, optional
             Lists of param values to explicitly ignore. Should have suffix '_drop'.
         **kwargs
-            Passed to `load_gfdl_file`.
+            Passed to `load_file`.
         """
         # Bail if selection has not changed since last call
         # This prevents unnecessary loads and calculations
@@ -368,7 +487,7 @@ class Experiment(object):
             # Load data
             if parts[0] == STORAGE:  # only use dataset with longest end time
                 files = files[-1:]
-            dataset = load_gfdl_file(*files, timer=timer, **kwargs)
+            dataset = load_file(*files, timer=timer, **kwargs)
             if verbose:
                 days = tuple(int(d) for f in files for d in re.findall(r'\bd([0-9]+)', f.name))  # noqa: E501
                 print(f'Loaded {expname} (days {min(days)}-{max(days)})')
@@ -391,7 +510,7 @@ class Experiment(object):
             else:
                 if parts[0] == STORAGE:  # only use dataset with longest end time
                     files = files[-1:]
-                dataset_base = load_gfdl_file(*files, **kwargs)
+                dataset_base = load_file(*files, **kwargs)
                 for var in dataset_base:
                     if var not in dataset:  # e.g. spectral also has 'tvar'
                         dataset[var] = dataset_base[var]
@@ -401,7 +520,7 @@ class Experiment(object):
             # experiments do not have this data.
             file_constants = path / 'constants.nc'
             if file_constants not in files:
-                dataset_constants = load_gfdl_file(file_constants, **kwargs)
+                dataset_constants = load_file(file_constants, **kwargs)
                 for var in ('teq', 'forcing', 'ndamp', 'rdamp'):
                     if var in dataset_constants:
                         dataset[var] = dataset_constants[var]
@@ -520,12 +639,12 @@ class Experiment(object):
         return expnames.climo.coords[expnames.dims[2]].climo.dequantify()
 
     @property
-    def parameters_all(self):  # DataArray for first param
+    def parameters_all(self):  # tuple of DataArrays for subsequent params
         expnames = self._expnames
         return tuple(expnames.climo.coords[dim].climo.dequantify() for dim in expnames.dims[2:])  # noqa: E501
 
     @property
-    def parameters_loaded(self):
+    def parameters_loaded(self):  # DataArray for first param
         return self.data.climo.coords[self.name].climo.dequantify()
 
 

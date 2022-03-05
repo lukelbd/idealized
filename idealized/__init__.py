@@ -27,6 +27,6 @@ def _make_stopwatch(timer=False, fixedwidth=20):
 from climopy import ureg, vreg, const  # noqa: F401
 from . import data  # noqa: F401
 from . import experiment  # noqa: F401
-from . import physics  # noqa: F401
+# from . import physics  # noqa: F401
 from . import figures  # noqa: F401
 from . import videos  # noqa: F401
