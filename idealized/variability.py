@@ -2,8 +2,8 @@
 """
 Todo
 ----
-These are the remaining EOF reduction modes that have not yet
-been transferred to new xarray accessor API.
+These are the remaining EOF reduction modes that have not
+yet been transferred to the xarray accessor API.
 """
 # Use pint.UnitRegistry() just like metpy! Then do *every* calculation
 # with units! Maybe we *parse* the units string for each DataArray and
@@ -12,83 +12,27 @@ import re
 import numpy as np
 import xarray as xr
 import climpy  # derivatives and stuff
-import functools
-import itertools
-import warnings
-from accessor import LORENZ_CONTENT_NAMES, LORENZ_FLUX_NAMES
-from numbers import Number
-from physics import Variable
 
 ureg = climpy.cbook.ureg
 const = climpy.const
 
 
-def preduce(name, data, preduce=None):
-    """
-    Reduce data along the *pressure* dimension.
-    """
-    # Average with variable vertical bounds by changing the weights
-    if preduce in ('trop', 'ctrop', 'pvtrop'):
-        _, tplev = paramy_reducep(preduce, data)
-        preduce = 'mean'
-        zsel = (0, 1050e2)
-        tplev = tplev[0]  # first sublist
-        dplev = np.zeros((plev.size, y.size))
-        for i in range(y.size):  # each latitude
-            print(f'Average lat {i} to {tplev[i]}.')
-            pidx, = np.where(plev_bnds[:, 1] >= tplev[i])
-            if pidx.size == 0:
-                rdata.append(np.nan)
-                continue
-            pidx = pidx[0]
-            bnds = plev_bnds.copy()
-            bnds[pidx, 0] = tplev[i]
-            bnds[:pidx, :] = tplev[i]  # artificial zero-width levels
-            dplev[:, i] = np.diff(bnds, axis=1).squeeze()
-
-    # Reduce axes in arbitrary ways
-    idata = paramyp(name, data)[2]
-    param = reduce(preduce, dplev, plev, idata, sel=zsel, axis=0)
-
-    # Apply additional scaling for special variables
-    if preduce == 'integral':
-        # TODO: Add support for column-integrated eddy momentum flux
-        # convergence to get eastward stress in Pa or Pa * m for raw flux
-        if name in (
-            'chf', 'cehf', 'cmhf',
-            'adiabatic', 'eadiabatic', 'madiabatic',
-            'tdt', 'itdt', 'forcing',
-        ):
-            # Get W/m2
-            param = const.cp * param / const.g
-        elif name in (
-            'hf', 'ehf', 'mhf'
-        ):
-            # Get m * W/m2 --> W by multiplying by latitude circle
-            param = 2 * np.pi * const.a * cos * const.cp * param / const.g
-        else:
-            raise ValueError(
-                f'Invalid variable {name!r} for column integration.'
-            )
-    return param
-
-
-def param1d_eof(
+def param_eof(
     vars, data, mode=None,
     lag=None, eof=None, nlag=None,  # nlag in days
     order=None, cutoff=None,
     lowpass=False, highpass=False, time=None,
     wintype='boxcar', nperseg=1000,
-    zsel=(0, 1000), psel=(0, 90)
+    plevrange=(0, 1000), latrange=(0, 90)
 ):
     """
-    Returns a numpy vector for some EOF parameter in a variety of ways. So
-    far this returns:
+    Returns a 1D numpy array for some EOF parameter in a variety of ways.
+    So far this supports:
 
-    * Co-power spectrum.
-    * Cross-correlation plot.
-    * 1D power spectrum.
-    * Maximum phase speed or wavenumber.
+    * Co-power spectra.
+    * Cross-correlations.
+    * 1D power spectra.
+    * Maximum phase speeds or wavenumbers.
 
     Parameters
     ----------
@@ -115,7 +59,6 @@ def param1d_eof(
     param : `Variable`
         The parameter. If list of 3 vectors, the edge 2 indicate error bounds.
     """
-
     # Mode used to interpret data
     if eof is None:
         eof = 1
@@ -139,7 +82,6 @@ def param1d_eof(
     latsel = slice(None)
     if latrange is not None:
         latsel = slice(*latrange)
-
 
     # Cross-correlation
     if mode == 'corr':
@@ -184,8 +126,8 @@ def param1d_eof(
         xparam, param = climpy.corr(*values, nlag=nlag, dt=dt)
 
         # Variables
-        xparam = Variable('lag', xparam)
-        param = Variable('correlation', param)
+        xparam = xr.DataArray(xparam, name='lag')
+        param = xr.DataArray(param, name='correlation')
 
     # Spectral analysis
     # NOTE: The 'cross' is just sum of cospectrum and quadrature spectrum
@@ -248,8 +190,8 @@ def param1d_eof(
             # param = param/param.sum()
 
         # Get x coordinates
-        xparam = Variable('f', xparam)  # frequency
-        param = Variable(mode, param)
+        xparam = xr.DataArray(xparam, name='f')  # frequency
+        param = xr.DataArray(param, name=mode)
 
     # Plot the variance explained by vertically averaging
     # WARNING: If you try to get variance explained in one variable by its
@@ -267,7 +209,7 @@ def param1d_eof(
         if np.iterable(eof):
             if var1 != var2:
                 raise ValueError(
-                    f'Cannot get percent variance explained in variable '
+                    'Cannot get percent variance explained in variable '
                     'by more than one EOF of one variable, since projections '
                     'are not necessarily orthogonal!'
                 )
@@ -302,7 +244,7 @@ def param1d_eof(
             ).sum(dim='plev').values
 
             # Coordinate
-            xparam = Variable('lat', xparam)  # frequency
+            xparam = xr.DataArray(xparam, name='lat')  # frequency
 
         # Next get this as function of *lag*
         else:
