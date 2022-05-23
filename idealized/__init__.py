@@ -28,5 +28,4 @@ from climopy import ureg, vreg, const  # noqa: F401
 from . import experiment  # noqa: F401
 from . import figures  # noqa: F401
 from . import physics  # noqa: F401
-from . import variability  # noqa: F401
 from . import videos  # noqa: F401
