@@ -3,7 +3,6 @@
 Register CF variables, transformations, and derivations in climopy.
 Lightly leverages a few pre-defined climopy variables.
 """
-# WARNING: keep_attrs fails for unary operations -data, +data, and abs(data)
 # NOTE: Important question: Why not just add attributes in the conversions
 # below and forego the separate CFVariable interface? Because do not want to
 # embed metadata definitions in a *derivation*, e.g. if we are loading the
@@ -20,19 +19,19 @@ import climopy as climo
 from climopy import const, ureg, vreg
 from climopy.internals.warnings import ClimopyWarning
 
+# Constants for feebacks and sensitivity
+C_DELTA = (const.cp / const.g).to('J m^-2 K^-1 Pa^-1')
+C_COLUMN = (const.cp * const.p0 / const.g).to('J m^-2 K^-1')
+Q_2XCO2 = 3.4 * ureg.watts / ureg.meter ** 2
+Q_4XCO2 = 6.8 * ureg.watts / ureg.meter ** 2
+P_SURFACE = 900 * ureg.hPa  # for climate sensitivity
+
 # Ranges for bulk gradients and fluxes
-SURFACE = 900  # for climate sensitivity
 LAT_LIM = (20, 70) * ureg.deg
 LEV_LIM = (300, 900) * ureg.hPa
 LEV_LIM = (300, 1013.25) * ureg.hPa
 LEV_LIM = (200, 1013.25) * ureg.hPa
 LEV_LIM = (200 * ureg.hPa, None)
-
-# Custom constants (see paper for citations)
-Q_2XCO2 = 3.4 * ureg.watts / ureg.meter ** 2
-Q_4XCO2 = 6.8 * ureg.watts / ureg.meter ** 2
-C_DELTA = (const.cp / const.g).to('J m^-2 K^-1 Pa^-1')
-C_COLUMN = (const.cp * const.p0 / const.g).to('J m^-2 K^-1')
 
 # Components for different variables
 PARTS_LORENZ = {
@@ -300,15 +299,17 @@ with warnings.catch_warnings():
     vreg.define('pslope', 'isentropic pressure slope', 'hPa / km')
     vreg.define('slope_bulk', long_prefix='bulk', parents='slope')
     vreg.define('slope_diff', long_prefix='dimensionless', standard_units='K / K', parents='slope', symbol=r'\Delta\Theta_h / \Delta\Theta_v')  # noqa: E501
+
+    # Tropopause terms
     vreg.define('ratio', 'equilibrium temperature gradient ratio', symbol=r'\Delta\Theta_h / \Delta\Theta_{h,eq}')  # noqa: E501
-    vreg.define('trop', 'WMO tropopause', parents='plev')
-    vreg.define('ztrop', 'WMO tropopause height', parents='zlev')
-    vreg.define('ctrop', 'thermal tropopause', parents='plev')
-    vreg.define('zctrop', 'thermal tropopause height', parents='zlev')
-    vreg.define('ttrop', 'tropopause temperature', parents='t')
-    vreg.define('pttrop', 'tropopause potential temperature', parents='pt')
-    vreg.define('pvtrop', '2PVU tropopause', parents='plev')
-    vreg.define('mtrop', 'mass-streamfunction tropopause', parents='plev')
+    vreg.define('trop', 'WMO tropopause pressure', parents='plev', standard_name='tropopause_air_pressure')  # noqa: E501
+    vreg.define('ztrop', 'WMO tropopause height', parents='zlev', standard_name='tropopause_altitude')  # noqa: E501
+    vreg.define('ctrop', 'thermal tropopause pressure', parents='plev', standard_name='thermal_tropopause_air_pressure')  # noqa: E501
+    vreg.define('zctrop', 'thermal tropopause height', parents='zlev', standard_name='thermal_tropopause_altitude')  # noqa: E501
+    vreg.define('ttrop', 'WMO tropopause temperature', parents='t', standard_name='tropopause_temperature')  # noqa: E501
+    vreg.define('pttrop', 'WMO tropopause potential temperature', parents='pt', standard_name='tropopause_potential_temperature')  # noqa: E501
+    vreg.define('pvtrop', 'dynamical tropopause pressure', parents='plev', standard_name='dynamical_tropopause_air_pressure')  # noqa: E501
+    vreg.define('mtrop', 'mass-streamfunction tropopause pressure', parents='plev', standard_name='mass_tropopause_air_pressure')  # noqa: E501
 
     # Momentum terms
     vreg.define('ucos', long_prefix='cosine-weighted', parents='u')
@@ -627,7 +628,7 @@ with warnings.catch_warnings():
     @climo.register_derivation(('cs', 'css'))
     def climate_sensitivity(self, name):
         # Actual atmospheric climate sensitivity
-        lev = 'avg' if name == 'cs' else SURFACE
+        lev = 'avg' if name == 'cs' else P_SURFACE
         data = self.get('t_anomaly', lev=lev, area='avg')
         data.attrs.clear()  # remove 'suffix' instruction
         return data
@@ -635,7 +636,7 @@ with warnings.catch_warnings():
     @climo.register_derivation(('rs', 'rss'))
     def relaxation_climate_sensitivity(self, name):
         # Climate sensitivity "predicted" by the reference feedback
-        lev = 'avg' if name == 'rs' else SURFACE
+        lev = 'avg' if name == 'rs' else P_SURFACE
         forcing = self.get('forcing_2', lev='int', area='avg')
         forcing = forcing.climo.to_units('W m^-2')
         ndamp = C_COLUMN * self.get('ndamp_1', lev=lev, area='avg')
