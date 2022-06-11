@@ -18,7 +18,7 @@ from icecream import ic  # noqa: F401
 
 import climopy as climo
 from climopy import const, ureg, vreg
-from climopy.internals.warnings import ClimoPyWarning
+from climopy.internals.warnings import ClimopyWarning
 
 # Ranges for bulk gradients and fluxes
 SURFACE = 900  # for climate sensitivity
@@ -55,7 +55,7 @@ PARTS_FLUX = {  # used in yzparam
 
 
 with warnings.catch_warnings():
-    warnings.simplefilter('ignore', category=ClimoPyWarning)
+    warnings.simplefilter('ignore', category=ClimopyWarning)
 
     # Coordinate variables and aliases
     vreg.alias('longitude', 'lon')
@@ -504,29 +504,29 @@ with warnings.catch_warnings():
         # Difference between temp and equlibrium temp
         return self.t - self.teq
 
-    @climo.register_derivation(('pt', 'pteq'))
-    def potential_temperature(self, name):
-        # Potential temperature
-        return self[name[1:]] / self.exner
-
     @climo.register_derivation('exner')
     def exner_function(self):
         # Exner function T/theta == (p / p0) ** kappa
         return (self.pres / const.p0).climo.to_units('') ** const.kappa
 
+    @climo.register_derivation(('pt', 'pteq'))
+    def potential_temperature(self, name):
+        # Potential temperature
+        return self[name[1:]] / self.exner
+
     @climo.register_derivation(('tdt', 'itdt'))
-    def thermal_damping(self, name):
-        # Thermal damping
+    def thermal_relaxation(self, name):
+        # Thermal relaxation
         data = self.tdt
         if name == 'itdt':
             data = -1 * data
         return data
 
-    @climo.register_derivation(('damping', 'idamping'))
-    def thermal_damping_manual_calculation(self, name):
-        # Manually calculated thermal damping (used for verification)
+    @climo.register_derivation(('relaxation', 'irelaxation'))
+    def thermal_relaxation_manual_calculation(self, name):
+        # Manually calculated thermal relaxation (used for verification)
         data = -1 * self.ndamp * (self.t - self.teq)
-        if name == 'idamping':
+        if name == 'irelaxation':
             data = -data
         return data
 
@@ -541,47 +541,18 @@ with warnings.catch_warnings():
         data[lev <= surf] = np.nan
         return data
 
-    @climo.register_derivation(('dtdy', 'dptdy'))
-    def temperature_gradient(self, name):
+    @climo.register_derivation('baro')
+    def baroclinicity(self):
+        # Baroclinicity from Lorenz and Hartmann, 2000, JC
+        # Final units are (m/s2)*(K/m)/(K*1/s) = (1/s2)/(1/s) = (1/s)
+        return const.g * self.dtdy / (self.b * 300 * ureg.K)
+
+    @climo.register_derivation(('dtdy', 'dptdy', 'dpvdy', 'ddsedy'))
+    def meridional_gradient(self, name):
         # Temperature gradient
         name = re.sub(r'\Ad(.*)dy\Z', r'\1', name)
-        return -1 * self[name].climo.derivative(y=1)
-
-    @climo.register_derivation('dpvdy')
-    def potential_vorticity_gradient(self):
-        # PV gradient
-        return self.pv.climo.derivative(y=1)
-
-    @climo.register_derivation('ddsedy')
-    def dry_static_energy_gradient(self):
-        # Eddy static energy gradient
-        return -1 * self.dse.climo.derivative(y=1)
-
-    @climo.register_derivation('dtdp')
-    def lapse_rate_pressure(self):
-        # Temperature lapse rate in pressure coords
-        return self.t.climo.derivative(lev=1)
-
-    @climo.register_derivation('dtdz')
-    def lapse_rate_height(self):
-        # Temperature lapse rate in height coords.
-        if self.cf.vertical_type == 'temperature':
-            return climo.deriv_uneven(self.z, self.t, keepedges=True)
-        else:
-            return -self.rho * const.g * self.t.climo.derivative(lev=1)
-
-    @climo.register_derivation('dptdp')
-    def potential_lapse_rate_pressure(self):
-        # Potential temp lapse rate in pressure coords
-        return self.pt.climo.derivative(lev=1)
-
-    @climo.register_derivation('dptdz')
-    def potential_lapse_rate_height(self):
-        # Potential temp lapse rate in height coords
-        pt = self.pt
-        rho = self.rho  # first get density
-        data = -rho * const.g * pt.climo.derivative(lev=1)
-        return data.climo.to_units('K / m')
+        sign = 1 if name == 'pv' else -1
+        return sign * self[name].climo.derivative(y=1)
 
     @climo.register_derivation(('slope', 'pslope'))
     def isentropic_slope(self, name):
@@ -596,12 +567,6 @@ with warnings.catch_warnings():
             data = self.dptdy / self.dptdp
         return data
 
-    @climo.register_derivation('baro')
-    def baroclinicity(self):
-        # Baroclinicity from Lorenz and Hartmann, 2000, JC
-        # Final units are (m/s2)*(K/m)/(K*1/s) = (1/s2)/(1/s) = (1/s)
-        return const.g * self.dtdy / (self.b * 300 * ureg.K)
-
     @climo.register_derivation('b')
     def buoyancy_frequency(self):
         # Brunt-Vaisala frequency in units 1 / s.
@@ -612,6 +577,42 @@ with warnings.catch_warnings():
         rho = self.rho
         dptdp = self.dptdp
         return np.sqrt((-rho * (const.g**2) * dptdp) / pt)
+
+    @climo.register_derivation(('dtdp', 'dptdp'))
+    def lapse_rate_pressure(self, name):
+        # Temperature lapse rate in pressure coords
+        # WARNING: Have to avoid add_cell_measures=True recursion due to
+        # calling this inside of e.g. cell height measure equation.
+        name = re.sub(r'\Ad(.*)dp', r'\1', name)
+        t = self.get(name, add_cell_measures=False, quantify=False)
+        return t.climo.derivative(lev=1)
+
+    @climo.register_derivation(('dtdz', 'dptdz'))
+    def lapse_rate_height(self, name, accurate=True):
+        # Temperature lapse rate in height coords.
+        # Include Reichler et al. 2003 option: https://doi.org/10.1029/2003GL018240
+        # WARNING: Have to avoid add_cell_measures=True recursion due to
+        # calling this inside of e.g. cell height measure equation.
+        # NOTE: Have to strip coordinates from averages to prevent xarray trying
+        # to align them but also have to manually broadcast pressure before division.
+        name = re.sub(r'\Ad(.*)dz', r'\1', name)
+        t = self.get(name, add_cell_measures=False, quantify=False)
+        if self.cf.vertical_type == 'temperature':
+            z = self.get('z', add_cell_measures=False)
+            data = climo.deriv_uneven(z, t, dim='lev', keepedges=True)
+        elif accurate:
+            p = self.lev.climo.dequantify() ** const.kappa.magnitude
+            t.attrs.pop('units', None)  # temperatures cancel so ignore units
+            p.attrs.pop('units', None)  # pressures cancel so ignore units
+            s1, s2 = slice(1, None), slice(None, -1)
+            pb = (p + 0 * t).transpose(*t.dims)  # broadcasted pressure
+            tavg = t.isel(lev=s1).data + t.isel(lev=s2).data
+            pavg = pb.isel(lev=s1).data + pb.isel(lev=s2).data
+            data = climo.deriv_half(p, t, dim='lev')[1] * (pavg / tavg)
+            data = data * -1 * (const.kappa * const.g / const.Rd)
+        else:
+            data = -self.rho * const.g * self[name].climo.derivative(lev=1)
+        return data.climo.to_units('K / km')
 
     @climo.register_derivation(('curvature', 'dcurvature'))
     def lapse_rate_curvature(self, name):
@@ -731,7 +732,7 @@ with warnings.catch_warnings():
         f = f.climo.divergence().climo.to_units('W m^-2')
         name = 'lat'
         data = (f + n).climo.reduce(  # where - meridional gradient goes - to +
-            lat='argzero', ntrack=1, which='posneg', lat_lim=(20, 70),
+            lat='argzero', which='posneg', nmax=1, lat_lim=(20, 70),
             dataset=self.data
         ).climo.to_units('deg')
         data.attrs['long_prefix'] = 'latitude shift due to'
@@ -779,8 +780,8 @@ with warnings.catch_warnings():
         return data
 
     @climo.register_derivation(re.compile(r'\Ai?tdt_(numerator|denominator)\Z'))
-    def thermal_damping_numerator_denominator(self, name):
-        # Contribution of teq and ntau to thermal damping
+    def thermal_relaxation_numerator_denominator(self, name):
+        # Contribution of teq and ntau to thermal relaxation
         # Numerator and denominator contribution
         name, part = name.split('_')
         num = -1 * self.get('deltat_' + ('2' if part == 'numerator' else '1'))
@@ -819,7 +820,7 @@ with warnings.catch_warnings():
 
     @climo.register_derivation(('diabatic', 'idiabatic'))
     def diabatic_heating(self, name):
-        # Total diabatic heating i.e. damping plus forcing
+        # Total diabatic heating i.e. relaxation plus forcing
         data = self.tdt + self.forcing
         if name == 'idiabatic':
             data = -data
@@ -928,8 +929,8 @@ with warnings.catch_warnings():
         return self.u * self.cos
 
     @climo.register_derivation('uweight')
-    def damping_weighted_zonal_wind(self):
-        # Zonal wind weighted by damping timescale
+    def relaxation_weighted_zonal_wind(self):
+        # Zonal wind weighted by relaxation timescale
         return self.cos * self.u.climo.average('lev', weight=self.rdamp)
 
     @climo.register_derivation('cemf_position', assign_name=False)
@@ -953,7 +954,7 @@ with warnings.catch_warnings():
         return (self.u + const.Omega * const.a * self.cos) * const.a * self.cos
 
     @climo.register_derivation(('udt', 'iudt'))
-    def mechanical_damping(self, name):
+    def mechanical_relaxation(self, name):
         # Drag weighted by cosine
         # data = self.udt * self.cos
         data = self.udt
@@ -1007,10 +1008,10 @@ with warnings.catch_warnings():
     def eddy_tem_meridional_wind(self):
         # Eddy-induced TEM meridional wind (see O'Gorman dynamics notes)
         # Use global mean potential temperature to scale
-        # WARNING: This will rarely vertically integrate to zero because streamfunction
-        # is heavily concentrated near surface (see O'Gorman Figure 5.1). Might also
-        # get weird results when global mean inversions are present (as with fast
-        # damping timescales).
+        # WARNING: This will rarely vertically integrate to zero because
+        # streamfunction is heavily concentrated near surface (see O'Gorman
+        # Figure 5.1). Might also get weird results when global mean inversions
+        # are present (as with fast relaxation timescales).
         ehf = self.ehf
         dptdp = self.pt.climo.average('area').climo.derivative(lev=1)
         return (ehf / dptdp).climo.derivative(lev=1)
@@ -1185,14 +1186,18 @@ with warnings.catch_warnings():
     def lapse_rate_tropopause(self, name):
         # Lapse rate tropopause: 2 K / km height. Look for points that go from less
         # negative to more negative lapse rates with increasing pressure.
+        # NOTE: This uses Reichler et al. 2003 algorithm; since we took derivative
+        # with p^kappa must interpolate with it: https://doi.org/10.1029/2003GL018240
         if self.cf.vertical_type == 'temperature':
             raise NotImplementedError('Cannot get tropopause for isentropic data.')
+        sel = {'lev': slice(50 * ureg.hPa, 400 * ureg.hPa)}
         trop = -2 * ureg.K / ureg.km
-        dtdz = self.dtdz
-        data = (dtdz - trop).climo.reduce(
-            lev='argzero', lev_min=80 * ureg.hPa, lev_max=350 * ureg.hPa,
-            dim_track='lat', which='posneg', dataset=self.data,
-        )
+        dtdz = self.get('dtdz', add_cell_measures=False)
+        dtdz = dtdz.climo.sel(**sel)
+        p = dtdz.lev.climo.sel(**sel)
+        p = p.climo.dequantify() ** const.kappa.magnitude
+        data, _ = climo.find(p, dtdz - trop, which='posneg')
+        data = self.lev.climo.units * data ** (1 / const.kappa.magnitude)
         if 'track' in data.dims:
             data = data.min(dim='track')  # minimum of obtained values
         if name == 'ztrop':
@@ -1204,11 +1209,13 @@ with warnings.catch_warnings():
     def thermal_curvature_tropopause(self, name):
         # Curvature tropopause: Where temperature is stabilizing fastest, i.e. rate
         # of rate of decrease is fastest, i.e. curvature has minimum.
-        dcurv = self.dcurvature
+        # NOTE: This could also use reichler algorithm in future.
+        sel = {'lev': slice(50 * ureg.hPa, 400 * ureg.hPa)}
+        dcurv = self.get('dcurvature', add_cell_measures=False)
+        dcurv = dcurv.climo.sel(**sel)
         data = dcurv.climo.reduce(
-            lev='argzero', lev_max=350 * ureg.hPa, dataset=self.data,
-            dim_track='lat', ntrack=1, which='negpos',
-            seed=150, sep=50,  # TODO: support units here
+            lev='argzero', which='negpos', nmax=1, seed=150, sep=50,
+            dim_track='lat', dataset=self.data,
         )
         if 'track' in data.dims:
             data = data.min(dim='track')

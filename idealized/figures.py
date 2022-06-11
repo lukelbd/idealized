@@ -104,8 +104,8 @@ def _compare_experiments(*args):
             ilabels = [scheme.upper() for scheme in schemes]  # default
             if set(blopts) == {'1', '2'}:
                 ilabels = [
-                    'scaled boundary layer damping' if blopt == '1'
-                    else 'fixed boundary layer damping' for blopt in blopts
+                    'scaled boundary layer relaxation' if blopt == '1'
+                    else 'fixed boundary layer relaxation' for blopt in blopts
                 ]
             elif set(modes) == {'hs', 'pk'}:
                 ilabels = [
@@ -118,8 +118,8 @@ def _compare_experiments(*args):
             ilabels = [exp.long_label for exp in iargs]  # default
             if iparams == {'ntau', 'ntaumean'}:
                 ilabels = [
-                    'damping full field' if name == 'ntau'
-                    else 'damping zonal mean component' for name in names
+                    'relaxation full field' if name == 'ntau'
+                    else 'relaxation zonal mean component' for name in names
                 ]
         # Multiple resolutions
         if len(resos) > 1:
@@ -722,7 +722,7 @@ def _subplot_per_simulation(
                 if as_param and ntau0 is not None:
                     param = ntau0.climo.to_variable(as_param, standardize=True)
                     title += '\n' + param.climo.scalar_label
-                if param.scheme == 'hs2':  # WARNING: kludge for uniform damping scheme
+                if param.scheme == 'hs2':  # WARNING: kludge for uniform relaxation 
                     title = re.sub(r'_(\{max\}|\{min\}|\{0\}|0)', '', title)
             ax.title.set_text(title)
 
@@ -1430,7 +1430,7 @@ def series(
     spec : str, (str, dict), or list thereof
         The variable spec(s). Parsed by `_parse_speclists`.
     reference : bool, optional
-        Whether to translate damping timescales to the "reference" value.
+        Whether to translate relaxation timescales to the "reference" value.
     as_param : str, optional
         Whether to add secondary parameter on the other side of the colorbar.
     as_param_bottom : bool, optional
@@ -1450,8 +1450,8 @@ def series(
         Passed to `~proplot.subplots.subplots` or  `~proplot.axes.Axes.format`.
     """
     # Initial stuff
-    # TODO: Leverage _compare_experiments to permit compare more than 2 series
-    # on this plot, e.g. mean damping, normal damping, and temperature grad.
+    # TODO: Leverage _compare_experiments to permit compare more than 2 series on
+    # this plot, e.g. mean relaxation, normal relaxation, and temperature grad.
     # TODO: Generalized methods for drawing arbitrary plots of various
     # things on different (a) subplots or different (b) twin axes. Maybe
     # can use some simpler helper class e.g. MultiPlot.
@@ -1602,7 +1602,7 @@ def series(
         if xscale == 'log':
             xlocator = xlocator or 'log'
             xminorlocator = xminorlocator or 'logminor'
-        if params.scheme == 'hs2':  # WARNING: kludge for uniform damping scheme
+        if params.scheme == 'hs2':  # WARNING: kludge for uniform relaxation
             xlabel = re.sub('reference ', '', xlabel)
         if xminorlocator == 'logminor':
             xminorlocator = pplt.LogLocator(subs=pplt.arange(1, 9), numdecs=10)
@@ -1622,7 +1622,7 @@ def series(
         # Format as_param axes
         if xax is not None:
             xlabel = params_alt.climo.long_label
-            if params.scheme == 'hs2':  # WARNING: kludge for uniform damping scheme
+            if params.scheme == 'hs2':  # WARNING: kludge for uniform relaxation
                 xlabel = re.sub('reference ', '', xlabel)
             kw = {
                 'xgrid': False,
