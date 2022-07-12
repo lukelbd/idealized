@@ -10,6 +10,7 @@ Lightly leverages a few pre-defined climopy variables.
 # consolidated, separate database from which "attributes" can be retrieved.
 import re
 import warnings
+import xarray as xr
 
 import metpy  # noqa: F401
 import numpy as np
@@ -43,13 +44,18 @@ PARTS_LORENZ = {
 }
 PARTS_FLUX = {  # used in yzparam
     'mf': ('ucos', 'v'),
-    'hf': ('t', 'v'),
     'gf': ('z', 'v'),
+    'hf': ('t', 'v'),
+    'lf': ('hus', 'v'),
+    'lsef': ('lse', 'v'),
     'dsef': ('dse', 'v'),
-    'pvf': ('pv', 'v'),  # isentropic only
-    'qgpvf': ('qgpv', 'v'),  # isobaric only
+    'msef': ('mse', 'v'),
     'vhf': ('pt', 'omega'),
     'vdsef': ('dse', 'omega'),  # should be idential to vhf?
+    'vlsef': ('lse', 'omega'),
+    'vmsef': ('mse', 'omega'),
+    'qgpvf': ('qgpv', 'v'),  # isobaric only
+    'pvf': ('pv', 'v'),  # isentropic only
 }
 
 
@@ -96,7 +102,8 @@ with warnings.catch_warnings():
     vreg.define('pv', 'potential vorticity', 'PVU')
     vreg.define('rho', 'density', 'kg / m3')
     vreg.define('exner', 'Exner function', '')
-    vreg.define('dse', 'static energy', symbol='DSE', parents='energy')  # parent units
+    vreg.define('dse', 'dry static energy', symbol='DSE', parents='energy')
+    vreg.define('lse', 'latent static energy', symbol='LSE', parents='energy')
     vreg.define('mse', 'moist static energy', symbol='MSE', parents='energy')
     vreg.define('qgpv', 'quasi-geostrophic potential vorticity', 'VU')
     vreg.define('omega', 'omega vertical wind', 'Pa / s')
@@ -191,13 +198,27 @@ with warnings.catch_warnings():
     # dsef = climo.Descriptor('dry static energy flux', 'W 100hPa^-1 m^-1')
     # msef = climo.Descriptor('moist static energy flux', 'W 100hPa^-1 m^-1')
     vreg.alias('meridional_energy_flux', 'ef')
-    vreg.define('dsef', 'static energy flux', parents='meridional_energy_flux')
+    vreg.define('dsef', 'dry static energy flux', parents='meridional_energy_flux')
     vreg.define('mdsef', long_prefix='mean', parents='dsef')
     vreg.define('edsef', long_prefix='eddy', parents='dsef')
     vreg.define('edsef_bulk', long_prefix='bulk', parents='edsef')
     vreg.define('cdsef', short_suffix='convergence', standard_units='W 100hPa^-1 m^-2', parents=('dsef', 'energy_flux'))  # noqa: E501
     vreg.define('cmdsef', long_prefix='mean', parents='cdsef')
     vreg.define('cedsef', long_prefix='eddy', parents='cdsef')
+    vreg.define('lsef', 'latent static energy flux', parents='meridional_energy_flux')
+    vreg.define('mlsef', long_prefix='mean', parents='lsef')
+    vreg.define('elsef', long_prefix='eddy', parents='lsef')
+    vreg.define('elsef_bulk', long_prefix='bulk', parents='elsef')
+    vreg.define('clsef', short_suffix='convergence', standard_units='W 100hPa^-1 m^-2', parents=('lsef', 'energy_flux'))  # noqa: E501
+    vreg.define('cmlsef', long_prefix='mean', parents='clsef')
+    vreg.define('celsef', long_prefix='eddy', parents='clsef')
+    vreg.define('msef', 'static energy flux', parents='meridional_energy_flux')
+    vreg.define('mmsef', long_prefix='mean', parents='msef')
+    vreg.define('emsef', long_prefix='eddy', parents='msef')
+    vreg.define('emsef_bulk', long_prefix='bulk', parents='emsef')
+    vreg.define('cmsef', short_suffix='convergence', standard_units='W 100hPa^-1 m^-2', parents=('msef', 'energy_flux'))  # noqa: E501
+    vreg.define('cmmsef', long_prefix='mean', parents='cmsef')
+    vreg.define('cemsef', long_prefix='eddy', parents='cmsef')
 
     # Heat fluxes
     # NOTE: Eddy flux equals zonal covariance. Spectral breakdowns are included here.
@@ -209,6 +230,14 @@ with warnings.catch_warnings():
     vreg.define('cehf', long_prefix='eddy', parents='chf')
     vreg.define('ehf_corr', long_prefix='eddy heat', parents='corr')
     vreg.define('ehf_bulk', long_prefix='bulk', parents='ehf')
+
+    # Specific humidity flux
+    vreg.define('lf', 'specific humidity flux', 'm / s', 'specific humidity flux', parents='meridional_energy_flux')  # noqa: E501
+    vreg.define('mlf', long_prefix='mean', parents='lf')
+    vreg.define('elf', long_prefix='eddy', parents='lf')
+    vreg.define('clf', short_name='expansion rate', long_suffix='convergence', standard_units='m / day', parents=('lf', 'energy_flux'))  # noqa: E501
+    vreg.define('cmlf', long_prefix='mean', parents='clf')
+    vreg.define('celf', long_prefix='eddy', parents='clf')
 
     # Geopotential fluxes
     vreg.define('gf', 'geopotential flux', 'm^2 / s', 'geopotential flux', parents='meridional_energy_flux')  # noqa: E501
@@ -284,8 +313,12 @@ with warnings.catch_warnings():
     vreg.define('dptdy_bulk', long_prefix='bulk', parents='dptdy')
     vreg.define('dpvdy', 'meridional PV gradient', 'PVU / 1000km')
     vreg.define('dpvdy_bulk', long_prefix='bulk', parents='dpvdy')
-    vreg.define('ddsedy', 'static energy gradient', 'J kg^-1 km^-1')
+    vreg.define('ddsedy', 'dry static energy gradient', 'J kg^-1 km^-1')
     vreg.define('ddsedy_bulk', long_prefix='bulk', parents='ddsedy')
+    vreg.define('dlsedy', 'latent static energy gradient', 'J kg^-1 km^-1')
+    vreg.define('dlsedy_bulk', long_prefix='bulk', parents='dlsedy')
+    vreg.define('dmsedy', 'moist static energy gradient', 'J kg^-1 km^-1')
+    vreg.define('dmsedy_bulk', long_prefix='bulk', parents='dmsedy')
     vreg.define('curvature', 'lapse rate curvature', 'K / km^2')
     vreg.define('dcurvature', 'derivative of curvature', 'K / km^3')
     vreg.define('dtdz', 'lapse rate', 'K / km')
@@ -333,14 +366,20 @@ with warnings.catch_warnings():
     vreg.define('diffusivity', 'diffusivity', 'km^2 / s')
     vreg.define('t_diffusivity', 'thermal diffusivity', parents='diffusivity')
     vreg.define('pv_diffusivity', 'PV diffusivity', parents='diffusivity')
-    vreg.define('dse_diffusivity', 'static energy diffusivity', parents='diffusivity')
+    vreg.define('dse_diffusivity', 'dry static energy diffusivity', parents='diffusivity')  # noqa: E501
+    vreg.define('lse_diffusivity', 'latent static energy diffusivity', parents='diffusivity')  # noqa: E501
+    vreg.define('mse_diffusivity', 'moist static energy diffusivity', parents='diffusivity')  # noqa: E501
     vreg.define('diffusivity_bulk', long_prefix='bulk', parents='diffusivity')
     vreg.define('t_diffusivity_bulk', long_prefix='bulk', parents='t_diffusivity')
     vreg.define('pv_diffusivity_bulk', long_prefix='bulk', parents='pv_diffusivity')
     vreg.define('dse_diffusivity_bulk', long_prefix='bulk', parents='dse_diffusivity')
+    vreg.define('lse_diffusivity_bulk', long_prefix='bulk', parents='lse_diffusivity')
+    vreg.define('mse_diffusivity_bulk', long_prefix='bulk', parents='mse_diffusivity')
     vreg.define('ehf_diffusive', 'diffusivity-predicted heat flux', parents='ehf')
     vreg.define('epvf_diffusive', 'diffusivity-predicted potential vorticity flux', parents='epvf')  # noqa: E501
     vreg.define('edsef_diffusive', 'diffusivity-predicted intensity', parents='edsef')
+    vreg.define('elsef_diffusive', 'diffusivity-predicted intensity', parents='elsef')
+    vreg.define('emsef_diffusive', 'diffusivity-predicted intensity', parents='emsef')
     vreg.define('itdt_numerator', '$T - T^e$ contribution', parents='itdt')
     vreg.define('itdt_denominator', r'$\tau$ contribution', parents='itdt')
     # vreg.define('itdt_denominator', r'$\tau_t$ contribution', parents='itdt')
@@ -500,6 +539,17 @@ with warnings.catch_warnings():
         units = 'J kg^-1'
         return sum(self[name].climo.to_units(units, 'climo') for name in ('t', 'z'))
 
+    @climo.register_derivation('lse')
+    def latent_static_energy(self):
+        # Latent static energy
+        units = 'J kg^-1'
+        return sum(self[name].climo.to_units(units, 'climo') for name in ('hus',))
+
+    @climo.register_derivation('mse')
+    def moist_static_energy(self):
+        # Moist static energy
+        return self.dse + self.lse
+
     @climo.register_derivation('deltat')
     def teq_difference(self):
         # Difference between temp and equlibrium temp
@@ -548,9 +598,9 @@ with warnings.catch_warnings():
         # Final units are (m/s2)*(K/m)/(K*1/s) = (1/s2)/(1/s) = (1/s)
         return const.g * self.dtdy / (self.b * 300 * ureg.K)
 
-    @climo.register_derivation(('dtdy', 'dptdy', 'dpvdy', 'ddsedy'))
+    @climo.register_derivation(('dtdy', 'dptdy', 'dpvdy', 'ddsedy', 'dlsedy', 'dmsedy'))
     def meridional_gradient(self, name):
-        # Temperature gradient
+        # Temperature or energy gradient
         name = re.sub(r'\Ad(.*)dy\Z', r'\1', name)
         sign = 1 if name == 'pv' else -1
         return sign * self[name].climo.derivative(y=1)
@@ -599,20 +649,26 @@ with warnings.catch_warnings():
         name = re.sub(r'\Ad(.*)dz', r'\1', name)
         t = self.get(name, add_cell_measures=False, quantify=False)
         if self.cf.vertical_type == 'temperature':
-            z = self.get('z', add_cell_measures=False)
-            data = climo.deriv_uneven(z, t, dim='lev', keepedges=True)
+            dim = self.cf.coordinates['vertical'][0]
+            z = self.get('z', add_cell_measures=False, quantify=True)
+            data = climo.deriv_uneven(z, t, dim=dim, keepedges=True)
         elif accurate:
-            p = self.lev.climo.dequantify() ** const.kappa.magnitude
-            t.attrs.pop('units', None)  # temperatures cancel so ignore units
+            dim = self.cf.coordinates['vertical'][0]
+            p = self.get('air_pressure', add_cell_measures=False, quantify=False)
+            with xr.set_options(keep_attrs=True):
+                p = p ** const.kappa.magnitude
+            attrs = p.attrs.copy()
             p.attrs.pop('units', None)  # pressures cancel so ignore units
+            t.attrs.pop('units', None)  # temperatures cancel so ignore units
             s1, s2 = slice(1, None), slice(None, -1)
             pb = (p + 0 * t).transpose(*t.dims)  # broadcasted pressure
-            tavg = t.isel(lev=s1).data + t.isel(lev=s2).data
-            pavg = pb.isel(lev=s1).data + pb.isel(lev=s2).data
-            data = climo.deriv_half(p, t, dim='lev')[1] * (pavg / tavg)
+            tavg = t.isel({dim: s1}).data + t.isel({dim: s2}).data
+            pavg = pb.isel({dim: s1}).data + pb.isel({dim: s2}).data
+            data = climo.deriv_half(p, t, dim=dim)[1] * (pavg / tavg)
             data = data * -1 * (const.kappa * const.g / const.Rd)
+            data.coords[dim].attrs.update(attrs)
         else:
-            data = -self.rho * const.g * self[name].climo.derivative(lev=1)
+            data = -self.rho * const.g * self[name].climo.derivative(vertical=1)
         return data.climo.to_units('K / km')
 
     @climo.register_derivation(('curvature', 'dcurvature'))
@@ -644,18 +700,13 @@ with warnings.catch_warnings():
         return (forcing / ndamp).climo.to_units('K')
 
     # ### Energy and momentum terms
-    @climo.register_derivation('egf')
-    def eddy_geopotential_flux(self):
-        # Eddy geopotential flux
-        warnings.warn('No egf data found. Assuming zero everywhere.')
-        return 0 * ureg('m^2 s^-1') * self.ehf.climo.dequantify()
-
-    @climo.register_derivation('evhf')
-    def eddy_vertical_heat_flux(self):
-        # Heat flux == omega * theta == (omega * T) * (p0 / p) ^ kappa
-        # Since C(EPE, EKE) == Rd * (omega' * T') / p the vertical eddy heat flux
-        # is stored *indirectly* in Lorenz term. See dry core for equation and
-        return -self.pres * self.cpeke / (const.Rd * self.exner)
+    @climo.register_derivation('emf_cos')
+    def eddy_angular_momentum_flux(self):
+        # Eddy momentum flux scaled with cosine.
+        # NOTE: Momentum fluxes are weighted by cos^2 so they reflect angular
+        # momentum. Remember M = (omega * a * cos(phi) + u) * a * cos(phi)
+        # and since Omega is constant an extra cosine scaling is sufficient.
+        return self.cos * self.emf
 
     @climo.register_derivation('epvf')
     def eddy_potential_vorticity_flux(self):
@@ -665,24 +716,56 @@ with warnings.catch_warnings():
         data[np.abs(pv) > 1.5 * ureg.PVU] = np.nan
         return data
 
-    @climo.register_derivation('emf_cos')
-    def eddy_angular_momentum_flux(self):
-        # Eddy momentum flux scaled with cosine.
-        # NOTE: Momentum fluxes are weighted by cos^2 so they reflect angular
-        # momentum. Remember M = (omega * a * cos(phi) + u) * a * cos(phi)
-        # and since Omega is constant an extra cosine scaling is sufficient.
-        return self.cos * self.emf
-
-    @climo.register_derivation('edsef')
-    def eddy_static_energy_flux(self):
+    @climo.register_derivation(('edsef', 'elsef', 'edsef'))
+    def eddy_static_energy_flux(self, name):
         # Eddy dry static energy flux
-        data = self.ehf * const.cp + self.egf * const.g
+        # TODO: Use 'climo' context transformations instead?
+        # TODO: Completely remove 'climo' context transformations? Note that here
+        # we do it manually... probably just fine to write definitions this way, and
+        # awkward that dimensionless can be silently converted to energy units.
+        parts = {}
+        if 'lse' in name or 'mse' in name:
+            parts.update({'elf': const.Lv})
+        if 'dse' in name or 'mse' in name:
+            parts.update({'ehf': const.cp, 'egf': const.g})
+        data = sum(value * self[key] for key, value in parts.items())
         return data.climo.to_units('J kg^-1 m s^-1')
 
-    @climo.register_derivation(re.compile(r'\Ac?(e|m)?(' + '|'.join(PARTS_FLUX) + r')\Z'))  # noqa: E501
+    @climo.register_derivation('egf')
+    def eddy_geopotential_height_flux(self):
+        # Eddy geopotential height flux
+        # TODO: This should not be assumed to be zero for data without
+        # zonally symmetric forcing conditions. Should expand definition.
+        warnings.warn('No egf data found. Assuming zero everywhere.')
+        return 0 * ureg('m^2 s^-1') * self.ehf.climo.dequantify()
+
+    @climo.register_derivation('evhf')
+    def eddy_vertical_heat_flux(self):
+        # Vertical eddy heat flux
+        # NOTE: The vertical flux is used to attribute energy transport changes
+        # leading to patterened latitude-height temperature responses. The mean
+        # flux is defined in the eddy_mean_flux function below.
+        # NOTE: This is flux == omega * theta == (omega * T) * (p0 / p) ^ kappa
+        # Since C(EPE, EKE) == Rd * (omega' * T') / p the vertical eddy heat flux
+        # is stored *indirectly* in Lorenz term. See dry core for equation and code.
+        return -self.pres * self.cpeke / (const.Rd * self.exner)
+
+    @climo.register_derivation(
+        re.compile(r'\Ae(' + '|'.join(PARTS_FLUX) + r')\Z')
+    )
+    def eddy_flux_residual(self, name):  # noqa: U100
+        # Eddy flux as a *residual* of the mean budget. This will
+        # only be reached if nothing else works.
+        # TODO: Write this function. Should use components.
+        pass
+
+    @climo.register_derivation(
+        re.compile(r'\Ac?(e|m)?(' + '|'.join(PARTS_FLUX) + r')\Z')
+    )
     def eddy_mean_flux(self, name):
         # Eddy, mean, or total meridional flux, or convergence thereof
-        # NOTE: Divergence
+        # NOTE: This should never be reached when requesting the raw eddy flux...
+        # only when requesting e.g. a total flux or eddy flux convergence.
         flux = name[1:] if (convergence := name[0] == 'c') else name  # trim 'c'
         flux_name = flux if flux in PARTS_FLUX else flux[1:]  # trim '(e|m)'
         part1, part2 = PARTS_FLUX[flux_name]
@@ -700,10 +783,15 @@ with warnings.catch_warnings():
                 data = -data.climo.divergence(cos_power=2 if flux_name[0] == 'm' else 1)
         return data
 
-    @climo.register_derivation(re.compile(r'\A(tdt|forcing|diabatic|rheating|cmdsef|cross)_approxdelta\Z'), assign_name=False)  # noqa: E501
+    @climo.register_derivation(
+        re.compile(r'\A(tdt|forcing|diabatic|rheating|cm[mld]sef|cross)_approxdelta\Z'),
+        assign_name=False
+    )
     def barpanda_approx_storm_track_shift(self, name):
         # Barpanda et al. approx contribution of energy terms to storm track shift.
         # Return full latitude *predicted* by individual terms.
+        # TODO: Support moist static energy. And perhaps have moist static energy
+        # automatically default to dry static energy if humidity is unavailable.
         # NOTE: Barpanda et al. write FMM as *divergence*. Switch the signs here.
         # f = -1 * self.get('cedsef_1', lev='int', standardize=True)  # div
         prefix, _ = name.split('_')
@@ -721,10 +809,15 @@ with warnings.catch_warnings():
         data.name = name.split('_')[0]
         return data
 
-    @climo.register_derivation(re.compile(r'\A(tdt|forcing|diabatic|rheating|cmdsef)_exactdelta\Z'), assign_name=False)  # noqa: E501
+    @climo.register_derivation(
+        re.compile(r'\A(tdt|forcing|diabatic|rheating|cm[mld]sef)_exactdelta\Z'),
+        assign_name=False
+    )
     def barpanda_exact_storm_track_shift(self, name):
         # Barpanda et al. exact contribution of energy terms to storm track shift.
         # Return full latitude *predicted* by individual terms.
+        # TODO: Support moist static energy. And perhaps have moist static energy
+        # automatically default to dry static energy if humidity is unavailable.
         # NOTE: Barpanda et al. write FMM as *divergence*. Switch the signs here.
         prefix, _ = name.split('_')
         n = self.get(prefix + '_anomaly', lev='int')
@@ -740,7 +833,10 @@ with warnings.catch_warnings():
         data.name = name.split('_')[0]
         return data
 
-    @climo.register_derivation(re.compile(r'\A(ehf|edsef|epvf)_diffusive(_response)?\Z'), assign_name=False)  # noqa: E501
+    @climo.register_derivation(
+        re.compile(r'\A(ehf|e[lmd]sef|epvf)_diffusive(_response)?\Z'),
+        assign_name=False
+    )
     def diffusive_energy_budget_response(self, name):
         # Estimate of anomaly using bulk diffusive assumption relative to reference.
         # NOTE: Unclear whether to use gradient at storm track position 2 or 1
@@ -765,7 +861,10 @@ with warnings.catch_warnings():
         data.name = name + '_diffusive'
         return data
 
-    @climo.register_derivation(re.compile(r'\A(ehf|edsef|epvf)_diffusive_local(_response)?\Z'), assign_name=False)  # noqa: E501
+    @climo.register_derivation(
+        re.compile(r'\A(ehf|e[lmd]sef|epvf)_diffusive_local(_response)?\Z'),
+        assign_name=False,
+    )
     def diffusive_local_flux_response(self, name):
         # Estimate of anomaly using local diffusive assumption
         name, _, _, *response = name.split('_')
@@ -844,6 +943,8 @@ with warnings.catch_warnings():
         # "residual" in sense that expect most of EHF to be balanced by diabatic
         # cooling. Includes *numerical* residual described by 'aheating'
         # data = -(self['diabatic'] + self['cehf'])
+        # TODO: Support moist static energy... default to dry only when humidity
+        # variable is not available, or auto-fill with NaN humidity variable.
         units = 'W kg^-1'
         data = -1 * sum(self[name].climo.to_units(units) for name in ('cedsef', 'diabatic'))  # noqa: E501
         if name == 'irheating':
@@ -855,6 +956,8 @@ with warnings.catch_warnings():
         # *All* heating sources. This characterizes numerical residual term due to
         # numerical error/failure to close energy budget.
         # data = sum(self[name] for name in ('chf', 'adiabatic', 'diabatic'))
+        # TODO: Support moist static energy... default to dry only when humidity
+        # variable is not available, or auto-fill with NaN humidity variable.
         units = 'W kg^-1'
         data = sum(self[name].climo.to_units(units) for name in ('cdsef', 'diabatic'))
         if name == 'iaheating':
@@ -870,7 +973,9 @@ with warnings.catch_warnings():
         adiabatic = self.madiabatic.climo.to_units(units)
         return cgf - adiabatic
 
-    @climo.register_derivation(re.compile(r'\A(t|pv|dse)_diffusivity\Z'))
+    @climo.register_derivation(
+        re.compile(r'\A(t|pv|[lmd]se)_diffusivity\Z')
+    )
     def local_diffusivity(self, name):
         # Eddy diffusivity, in units m^2/s, masking out regions with tiny gradients
         name, _ = name.split('_')
@@ -881,6 +986,8 @@ with warnings.catch_warnings():
             't': ureg.Quantity(0.5e-3, 'K km^-1'),
             'pv': ureg.Quantity(0.5e-3, 'PVU km^-1'),
             'dse': ureg.Quantity(0.5, 'J kg^-1 km^-1'),
+            'lse': ureg.Quantity(0.5, 'J kg^-1 km^-1'),
+            'mse': ureg.Quantity(0.5, 'J kg^-1 km^-1'),
         }
         data.data[np.abs(grad.data) < mins[name]] = np.nan
         return data
@@ -1191,14 +1298,20 @@ with warnings.catch_warnings():
         # with p^kappa must interpolate with it: https://doi.org/10.1029/2003GL018240
         if self.cf.vertical_type == 'temperature':
             raise NotImplementedError('Cannot get tropopause for isentropic data.')
-        sel = {'lev': slice(50 * ureg.hPa, 400 * ureg.hPa)}
-        trop = -2 * ureg.K / ureg.km
-        dtdz = self.get('dtdz', add_cell_measures=False)
+        dim = self.cf.coordinates['vertical'][0]
+        sel = {dim: slice(50 * ureg.hPa, 400 * ureg.hPa)}
+        dtdz = self.get('dtdz', add_cell_measures=False, quantify=True)
         dtdz = dtdz.climo.sel(**sel)
-        p = dtdz.lev.climo.sel(**sel)
-        p = p.climo.dequantify() ** const.kappa.magnitude
-        data, _ = climo.find(p, dtdz - trop, which='posneg')
-        data = self.lev.climo.units * data ** (1 / const.kappa.magnitude)
+        dtdz = (dtdz - ureg('-2K/km')).climo.dequantify()
+        p = dtdz.coords[dim].climo.sel(**sel)
+        with xr.set_options(keep_attrs=True):
+            p = p ** const.kappa.magnitude
+        attrs = p.attrs.copy()
+        p.attrs.pop('units', None)  # pressures cancel so ignore units
+        data, _ = climo.find(p, dtdz, which='posneg')
+        data = data ** (1 / const.kappa.magnitude)
+        data.attrs.update(attrs)
+        data = data.climo.quantify()
         if 'track' in data.dims:
             data = data.min(dim='track')  # minimum of obtained values
         if name == 'ztrop':
@@ -1211,7 +1324,8 @@ with warnings.catch_warnings():
         # Curvature tropopause: Where temperature is stabilizing fastest, i.e. rate
         # of rate of decrease is fastest, i.e. curvature has minimum.
         # NOTE: This could also use reichler algorithm in future.
-        sel = {'lev': slice(50 * ureg.hPa, 400 * ureg.hPa)}
+        dim = self.cf.coordinates['vertical'][0]
+        sel = {dim: slice(50 * ureg.hPa, 400 * ureg.hPa)}
         dcurv = self.get('dcurvature', add_cell_measures=False)
         dcurv = dcurv.climo.sel(**sel)
         data = dcurv.climo.reduce(
@@ -1258,15 +1372,17 @@ with warnings.catch_warnings():
         ]
         return params[0] / params[1]
 
-    @climo.register_derivation(('dtdy_bulk', 'dptdy_bulk', 'ddsedy_bulk'))
+    @climo.register_derivation(
+        ('dtdy_bulk', 'dptdy_bulk', 'ddsedy_bulk', 'dlsedy_bulk', 'dmsedy_bulk')
+    )
     def bulk_meridional_gradient(self, name):
         # Mean temperature gradient across box (calculated as difference)
         # NOTE: Used to just subtract gradients, but that failes to account
         # for cosine latitude weights! Invalid method!
         name = re.sub(r'\Ad(.*)dy_bulk\Z', r'\1', name)
         vertical = self.cf.vertical_type
-        if vertical == 'temperature' and name == 'dse':
-            raise NotImplementedError('Cannot get DSE gradient on isentropic levels.')
+        if vertical == 'temperature' and name[1:] == 'se':
+            raise NotImplementedError('Cannot get isentropic static energy gradients.')
         elif vertical == 'temperature':
             # Use gradient of sea-level potential temp (close enough to temp)
             idx = np.round(0.5 * self.x.size).astype(int)
@@ -1309,18 +1425,20 @@ with warnings.catch_warnings():
         return dt
 
     # ### Bulk diffusivity metrics
-    @climo.register_derivation(('ehf_bulk', 'edsef_bulk'))
+    @climo.register_derivation(
+        ('ehf_bulk', 'edsef_bulk', 'elsef_bulk', 'emsef_bulk'),
+    )
     def bulk_eddy_flux(self, name):
         # Preset average for meridional eddy flux
         name, _ = name.split('_')
         return self.get(name, lev=850 * ureg.hPa, area='avg', lat_lim=LAT_LIM)
         # return self.get(name, lev='avg', lev_lim=LEV_LIM, area='avg', lat_lim=LAT_LIM)
 
-    @climo.register_derivation(re.compile(r'\Z(t|dse)_diffusivity_bulk'))
+    @climo.register_derivation(re.compile(r'\Z(t|[lmd]se)_diffusivity_bulk'))
     def bulk_eddy_diffusivity(self, name):
         # Diffusivity using bulk flux and gradient metrics
         name, _, _ = name.split('_')
-        flux = self.ehf_bulk if name == 't' else self.edsef_bulk
+        flux = self['e' + ('h' if name == 't' else name[3:]) + 'f_bulk']
         dfdy = self.get('d' + name + 'dy_bulk')
         return flux / dfdy
 

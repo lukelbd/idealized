@@ -26,17 +26,6 @@ pplt.rc['subplots.refwidth'] = 1.8
 pplt.rc['subplots.panelpad'] = 0.8
 
 
-class _dict_of_lists(dict):
-    """
-    Simple dictionary for storing groups of lists.
-    """
-    def add(self, key, item):
-        # Add to list and initialize if list is not present
-        if key not in self:
-            self[key] = []
-        self[key].append(item)
-
-
 def _double_colorbar_patch(cax):
     """
     Monkey patch that ensures double colorbar axes positions are locked.
@@ -49,96 +38,6 @@ def _double_colorbar_patch(cax):
         self.set_position(cax.get_position())
         type(self).draw(self, *args, **kwargs)
     return _reposition
-
-
-def _compare_experiments(*args):
-    """
-    Return dictionary of various properties that can be used to style figure
-    components and compare the experiments in a legend.
-
-    Parameters
-    ----------
-    *args : `experiment.Experiment`
-        The experiments.
-
-    Returns
-    -------
-    dict
-        Dictionary containing the keys:
-
-        * leader : Boolean list, indicates whether each experiment is group 'leader'.
-        * labels : Labels used to differentiate experiment with same name.
-        * colors : Colors used to differentiate different experiment.
-        * linestyles : Line styles used to differentiate experiment with same name.
-    """
-    # Simple settings
-    unique = lambda x: (seen := set()) or tuple(_ for _ in x if _ not in seen and not seen.add(_))  # noqa: E501
-    linestyles_multi = ['-', (0, (1, 0.5)), (0, (2, 0.5)), (0, (3, 0.5))]
-    linestyles = ['-'] * len(args)  # default
-    colors = [exp.color for exp in args]
-    labels = [None for exp in args]  # no labels by default
-    leader = [True] * len(args)  # is this the "first" entry in a subgroup?
-    if len(args) > len(linestyles_multi):
-        raise ValueError('Too many experiments.')
-
-    # Get labels by iterating through *subgroups*, for now just groups
-    # where the parameter is the same (e.g. 'ntau', 'tgrad', etc.)
-    # NOTE: For parameters without any peers, set the label to None.
-    names = [re.sub('ntau(mean|anom)', 'ntau', exp.name) for exp in args]
-    for name in set(names):
-        # Get subgroups
-        idxs = [i for i, iname in enumerate(names) if iname == name]
-        iargs = [args[idx] for idx in idxs]
-        if len(idxs) <= 1:
-            continue
-
-        # Get label names for this subgroup
-        ilabels = [exp.category for exp in iargs]  # default labels
-        schemes = unique('-'.join(unique(exp.schemes)) for exp in iargs)
-        names = unique('-'.join(unique(exp.names)) for exp in iargs)
-        resos = unique('-'.join(unique(exp.resos)) for exp in iargs)
-        # Multiple schemes
-        if len(schemes) > 1:
-            modes = tuple(re.sub(r'[0-9]\Z', '', scheme) for scheme in schemes)
-            blopts = tuple(re.sub(r'\A[a-zA-Z]*', '', scheme) for scheme in schemes)
-            ilabels = [scheme.upper() for scheme in schemes]  # default
-            if set(blopts) == {'1', '2'}:
-                ilabels = [
-                    'scaled boundary layer relaxation' if blopt == '1'
-                    else 'fixed boundary layer relaxation' for blopt in blopts
-                ]
-            elif set(modes) == {'hs', 'pk'}:
-                ilabels = [
-                    'inactive stratosphere' if mode == 'hs'
-                    else 'active stratosphere' for mode in modes
-                ]
-        # Multiple experiment names
-        if len(names) > 1:
-            iparams = set(names)
-            ilabels = [exp.long_label for exp in iargs]  # default
-            if iparams == {'ntau', 'ntaumean'}:
-                ilabels = [
-                    'relaxation full field' if name == 'ntau'
-                    else 'relaxation zonal mean component' for name in names
-                ]
-        # Multiple resolutions
-        if len(resos) > 1:
-            ilabels = [reso[:-1].upper() for reso in resos]
-
-        # Add colors and linestyles for legend entries
-        for i, idx in enumerate(idxs):
-            leader[idx] = i == 0
-            labels[idx] = ilabels[i]
-            colors[idx] = iargs[idxs[0]].color
-            linestyles[idx] = linestyles_multi[i]
-
-    # Return settings
-    return {
-        'leader': leader,
-        'labels': labels,
-        'colors': colors,
-        'linestyles': linestyles,
-    }
 
 
 def _get_item(name, specs, idx=2):
@@ -516,32 +415,6 @@ def _parse_speclists(*specs, prefer_single_subplot=False):
     return specs_final[0] if len(specs_final) == 1 else specs_final
 
 
-def _parse_explists(args):
-    """
-    Parse list (of lists) of experiments.
-    """
-    if not any(isinstance(arg, list) for arg in args):
-        args = [[arg] for arg in args]  # default to single series per subplot
-    if not all(isinstance(_, experiment.Experiment) for arg in args for _ in arg):
-        raise ValueError('Input data must be Experiment.')
-    return args
-
-
-def _plot_spectral(ax):
-    """
-    Add special "spectral" lines showing meaningful reference quantities.
-    """
-    # Upscale energy cascade line
-    x = np.array([7.0, 15.0])
-    ax.plot(x, 10 * x**(-5 / 3), color='k', ls='--')
-    ax.text(10, 0.25, '$k^{-5/3}$', transform='data', weight='bold')
-
-    # Downscale enstrophy cascade line
-    x = np.array([15.0, 40.0])
-    ax.plot(x, 100 * x**(-3.0), color='k', ls='--')
-    ax.text(25, 0.007, '$k^{-3}$', transform='data', weight='bold')
-
-
 def _plot_equality(ax, params, line, color='gray5', markercolor='gray5'):
     """
     Plot the line where *x-axis* equals this special variable.
@@ -576,14 +449,15 @@ def _plot_explines(ax, params, ibase):
     return (phs, pm)
 
 
-def _plot_reflines(ax, vlines=None, hlines=None):
+def _parse_explists(args):
     """
-    Plot zero lines with consistent style.
+    Parse list (of lists) of experiments.
     """
-    for (lines, func) in ((vlines, ax.axvline), (hlines, ax.axhline)):
-        if lines is not None:
-            for line in np.atleast_1d(lines):
-                func(line, ls='-', lw=1, color='k', alpha=0.3, zorder=4)
+    if not any(isinstance(arg, list) for arg in args):
+        args = [[arg] for arg in args]  # default to single series per subplot
+    if not all(isinstance(_, experiment.Experiment) for arg in args for _ in arg):
+        raise ValueError('Input data must be Experiment.')
+    return args
 
 
 def _plot_refdiag(ax, origin):
@@ -594,13 +468,36 @@ def _plot_refdiag(ax, origin):
     x, y = origin
     return ax.plot(
         [-extent * x, extent * x], [-extent * y, extent * y],
-        ls='--', lw=1, color='k',
-        scalex=False, scaley=False,
-        zorder=1,
+        ls='--', lw=1, color='k', scalex=False, scaley=False, zorder=1,
     )
 
 
-def _savefig(func):
+def _plot_reflines(ax, vlines=None, hlines=None):
+    """
+    Plot zero lines with consistent style.
+    """
+    for (lines, func) in ((vlines, ax.axvline), (hlines, ax.axhline)):
+        if lines is not None:
+            for line in np.atleast_1d(lines):
+                func(line, ls='-', lw=1, color='k', alpha=0.3, zorder=4)
+
+
+def _plot_spectral(ax):
+    """
+    Add special "spectral" lines showing meaningful reference quantities.
+    """
+    # Upscale energy cascade line
+    x = np.array([7.0, 15.0])
+    ax.plot(x, 10 * x**(-5 / 3), color='k', ls='--')
+    ax.text(10, 0.25, '$k^{-5/3}$', transform='data', weight='bold')
+
+    # Downscale enstrophy cascade line
+    x = np.array([15.0, 40.0])
+    ax.plot(x, 100 * x**(-3.0), color='k', ls='--')
+    ax.text(25, 0.007, '$k^{-3}$', transform='data', weight='bold')
+
+
+def _save_fig(func):
     """
     Decorator that adds a save option to plotting functions.
 
@@ -621,6 +518,148 @@ def _savefig(func):
             fig.save(path)
         return fig, axs
     return wrapper
+
+
+def _sine_axis_kludge(*args, sine=None, **kwargs):
+    """
+    Fix the sine axis contouring issues.
+
+    Parameters
+    ----------
+    *args
+        The positional data arguments.
+    sine : bool
+        Whether to use a sine latitude axis.
+    **kwargs
+        The keyword formatting arguments.
+    """
+    if not sine:
+        sine = kwargs.pop('xscale', None) == 'sine'
+    if sine:
+        warnings.warn('Implementing sine x-axis kludge.')
+        lim = kwargs.pop('xlim', [-90, 90])
+        locator = pplt.Locator(
+            kwargs.pop('xlocator', pplt.AutoLocator()),
+            **(kwargs.pop('xlocator_kw', None) or {}),
+        ).tick_values(*lim)
+        minorlocator = pplt.Locator(
+            kwargs.pop('xminorlocator', pplt.AutoLocator()),
+            **(kwargs.pop('xminorlocator_kw', None) or {}),
+        ).tick_values(*lim)
+        formatter = pplt.Formatter(
+            kwargs.pop('xformatter', pplt.AutoFormatter()),
+            **(kwargs.pop('xformatter_kw', None) or {}),
+        )
+        kwargs['xlim'] = np.sin(np.pi * np.array(lim) / 180.0)
+        kwargs['xlocator'] = np.sin(np.pi * locator / 180.0)
+        kwargs['xminorlocator'] = np.sin(np.pi * minorlocator / 180.0)
+        kwargs['xformatter'] = pplt.FuncFormatter(
+            lambda x, pos=None:  # noqa: U100
+            formatter(np.round(180.0 * np.arcsin(x) / np.pi)),
+        )
+        if len(args) == 1:
+            args = (
+                args[0].coords[args[0].dims[1]],
+                args[0].coords[args[0].dims[0]],
+                args[0],
+            )
+        if len(args) > 0 and args[0].name == 'lat':
+            args = (
+                np.sin(np.pi * args[0].data / 180.0),
+                args[1].data,
+                args[2].data,
+            )
+    return sine, args, kwargs
+
+
+def _settings_experiments(*args):
+    """
+    Return dictionary of various settings that can be used to style figure
+    components and compare the experiments in a legend.
+
+    Parameters
+    ----------
+    *args : `experiment.Experiment`
+        The experiments.
+
+    Returns
+    -------
+    dict
+        Dictionary containing the keys:
+
+        * leader : Boolean list, indicates whether each experiment is group 'leader'.
+        * labels : Labels used to differentiate experiment with same name.
+        * colors : Colors used to differentiate different experiment.
+        * linestyles : Line styles used to differentiate experiment with same name.
+    """
+    # Simple settings
+    unique = lambda x: (seen := set()) or tuple(_ for _ in x if _ not in seen and not seen.add(_))  # noqa: E501
+    linestyles_multi = ['-', (0, (1, 0.5)), (0, (2, 0.5)), (0, (3, 0.5))]
+    linestyles = ['-'] * len(args)  # default
+    colors = [exp.color for exp in args]
+    labels = [None for exp in args]  # no labels by default
+    leader = [True] * len(args)  # is this the "first" entry in a subgroup?
+    if len(args) > len(linestyles_multi):
+        raise ValueError('Too many experiments.')
+
+    # Get labels by iterating through *subgroups*, for now just groups
+    # where the parameter is the same (e.g. 'ntau', 'tgrad', etc.)
+    # NOTE: For parameters without any peers, set the label to None.
+    names = [re.sub('ntau(mean|anom)', 'ntau', exp.name) for exp in args]
+    for name in set(names):
+        # Get subgroups
+        idxs = [i for i, iname in enumerate(names) if iname == name]
+        iargs = [args[idx] for idx in idxs]
+        if len(idxs) <= 1:
+            continue
+
+        # Get label names for this subgroup
+        ilabels = [exp.category for exp in iargs]  # default labels
+        schemes = unique('-'.join(unique(exp.schemes)) for exp in iargs)
+        names = unique('-'.join(unique(exp.names)) for exp in iargs)
+        resos = unique('-'.join(unique(exp.resos)) for exp in iargs)
+        # Multiple schemes
+        if len(schemes) > 1:
+            modes = tuple(re.sub(r'[0-9]\Z', '', scheme) for scheme in schemes)
+            blopts = tuple(re.sub(r'\A[a-zA-Z]*', '', scheme) for scheme in schemes)
+            ilabels = [scheme.upper() for scheme in schemes]  # default
+            if set(blopts) == {'1', '2'}:
+                ilabels = [
+                    'scaled boundary layer relaxation' if blopt == '1'
+                    else 'fixed boundary layer relaxation' for blopt in blopts
+                ]
+            elif set(modes) == {'hs', 'pk'}:
+                ilabels = [
+                    'inactive stratosphere' if mode == 'hs'
+                    else 'active stratosphere' for mode in modes
+                ]
+        # Multiple experiment names
+        if len(names) > 1:
+            iparams = set(names)
+            ilabels = [exp.long_label for exp in iargs]  # default
+            if iparams == {'ntau', 'ntaumean'}:
+                ilabels = [
+                    'relaxation full field' if name == 'ntau'
+                    else 'relaxation zonal mean component' for name in names
+                ]
+        # Multiple resolutions
+        if len(resos) > 1:
+            ilabels = [reso[:-1].upper() for reso in resos]
+
+        # Add colors and linestyles for legend entries
+        for i, idx in enumerate(idxs):
+            leader[idx] = i == 0
+            labels[idx] = ilabels[i]
+            colors[idx] = iargs[idxs[0]].color
+            linestyles[idx] = linestyles_multi[i]
+
+    # Return settings
+    return {
+        'leader': leader,
+        'labels': labels,
+        'colors': colors,
+        'linestyles': linestyles,
+    }
 
 
 def _subplot_per_simulation(
@@ -722,7 +761,7 @@ def _subplot_per_simulation(
                 if as_param and ntau0 is not None:
                     param = ntau0.climo.to_variable(as_param, standardize=True)
                     title += '\n' + param.climo.scalar_label
-                if param.scheme == 'hs2':  # WARNING: kludge for uniform relaxation 
+                if param.scheme == 'hs2':  # WARNING: kludge for uniform relaxation
                     title = re.sub(r'_(\{max\}|\{min\}|\{0\}|0)', '', title)
             ax.title.set_text(title)
 
@@ -790,7 +829,7 @@ def _subplot_per_experiment(
     return fig, axs, kwargs
 
 
-@_savefig
+@_save_fig
 def curves(
     *args,
     spec=None,
@@ -944,7 +983,7 @@ def curves(
     return fig, axs
 
 
-@_savefig
+@_save_fig
 def lorenz(
     *args,
     rednoise=False,
@@ -1183,7 +1222,7 @@ def lorenz(
     if parametric:
         for i, (label, handle) in enumerate(handles.items()):
             fig.colorbar(
-                handle, label=label, loc='b', length=0.4
+                handle, label=label, loc='b', length=0.4, tickminor=False,
             )
     else:
         fig.legend(
@@ -1193,7 +1232,7 @@ def lorenz(
     return fig, axs
 
 
-@_savefig
+@_save_fig
 def parametric(
     *args,
     xspec=None,
@@ -1236,7 +1275,7 @@ def parametric(
     **kwargs
         Passed to `~proplot.subplots.subplots` or  `~proplot.axes.Axes.format`.
     """
-    sprops = _compare_experiments(*args)  # props for comparing experiments
+    sprops = _settings_experiments(*args)  # props for comparing experiments
     xspecs, yspecs = _parse_speclists(xspec, yspec, prefer_single_subplot=False)
     lw = lw or linewidth or 5
     lws = [lw] * len(args) if np.isscalar(lw) or lw is None else list(lw)
@@ -1347,6 +1386,7 @@ def parametric(
             tickloc='top' if params_alt is not None and as_param_bottom else 'bottom',
             ticklabels=[fmt(param.item()) for param in params],
             space=7 if params_alt is not None and i == 0 else 4,
+            tickminor=False,
             **kwargs,
         )
 
@@ -1365,6 +1405,7 @@ def parametric(
                 label=params_alt.climo.long_label,
                 tickloc='bottom' if as_param_bottom else 'top',
                 ticklabels=[fmt(param.item()) for param in params_alt],
+                tickminor=False,
                 **kwargs,
             )
             cb.minorticks_off()  # necessary for some reason
@@ -1398,7 +1439,7 @@ def parametric(
     return fig, ax
 
 
-@_savefig
+@_save_fig
 def series(
     *args,
     spec=None,
@@ -1450,7 +1491,7 @@ def series(
         Passed to `~proplot.subplots.subplots` or  `~proplot.axes.Axes.format`.
     """
     # Initial stuff
-    # TODO: Leverage _compare_experiments to permit compare more than 2 series on
+    # TODO: Leverage _settings_experiments to permit compare more than 2 series on
     # this plot, e.g. mean relaxation, normal relaxation, and temperature grad.
     # TODO: Generalized methods for drawing arbitrary plots of various
     # things on different (a) subplots or different (b) twin axes. Maybe
@@ -1481,7 +1522,7 @@ def series(
     for i, (exps, ispecs) in enumerate(itertools.product(args, specs)):
         ps = []
         ax = axs[i]
-        sprops = _compare_experiments(*exps)  # noqa: F841 TODO: use this!
+        sprops = _settings_experiments(*exps)  # noqa: F841 TODO: use this!
         if len(ispecs) > 1 and len(exps) > 1:
             raise ValueError('Cannot plot multiple specs and series in same subplot.')
         scheme = exps[0].scheme
@@ -1669,7 +1710,7 @@ def series(
     return fig, axs
 
 
-@_savefig
+@_save_fig
 def stacks(
     *args,
     spec=None,
@@ -1831,13 +1872,14 @@ def stacks(
             label=exp.long_label,
             ticklabels=ticklabels,
             values=np.arange(len(ticklabels)),
+            tickminor=False,
             # values=exp.parameters_loaded,
         )
 
     return fig, axs
 
 
-@_savefig
+@_save_fig
 def xsections(
     *args,
     mode='yz',
@@ -1908,7 +1950,7 @@ def xsections(
     trop1_kw = {'lw': 2, 'color': 'gray5', 'zorder': 2.5, 'dashes': (1, 1)}
     trop2_kw = {'lw': 2, 'color': 'gray7', 'zorder': 2.5, 'dashes': (1, 1)}
     legend_kw = {'ncol': ncol, 'frame': False, 'center': ncol == 1, 'order': 'FC'[ncol == 1]}  # noqa: E501
-    colorbar_kw = {'length': length, 'pad': 0.8}
+    colorbar_kw = {'pad': 0.80, 'length': length}
     quiver_kw = {
         'width': 0.003, 'angles': 'uv', 'scale': 10, 'scale_units': 'height',
         'minlength': 0, 'headwidth': 3, 'headlength': 5, 'headaxislength': 3,
@@ -1923,7 +1965,7 @@ def xsections(
     fig, axs, kwargs = _subplot_per_simulation(args, nvars=nvars, **kwargs)
 
     # Draw stuff
-    plots = _dict_of_lists()
+    plots = {}
     for i, (j, k) in enumerate(itertools.product(range(nvars), range(nsims))):
         # Axes properties and coordinates
         # NOTE: Must set x limits first to trigger inbounds limitation
@@ -1966,7 +2008,8 @@ def xsections(
             kwplot['levels'] = levels
             kwplot['extend'] = extend
             kwplot.setdefault('corner_mask', True)
-            plots.add((j, contourf, 'contourf'), (ax, dcontourf, kwplot))
+            cmds = plots.setdefault((j, contourf, 'contourf'), [])
+            cmds.append((ax, dcontourf, kwplot))
 
             # Add panels showing means or slices along side!
             for side in 'lrbt':
@@ -2027,7 +2070,8 @@ def xsections(
             kwplot.setdefault('labels', True)
             kwplot.setdefault('colors', 'k')
             kwplot.setdefault('linewidths', 0.7)
-            plots.add((j, contour, 'contour'), (ax, dcontour, kwplot))
+            cmds = plots.setdefault((j, contour, 'contour'),  [])
+            cmds.append((ax, dcontour, kwplot))
 
         # Quiver arrows
         for quiver1, quiver2 in zip(iquiver1s, iquiver2s):
@@ -2054,7 +2098,8 @@ def xsections(
             kwplot = quiver_kw.copy()
             kwplot['hlabel'] = f'{formatter(bases[0])} {qdatas[0].climo.units_label}'
             kwplot['vlabel'] = f'{formatter(bases[1])} {qdatas[1].climo.units_label}'
-            plots.add((j, quiver1, quiver2, 'quiver'), (ax, *qdatas, kwplot))
+            cmds = plots.setdefault((j, quiver1, quiver2, 'quiver'), [])
+            cmds.append((ax, *qdatas, kwplot))
 
         # Tropopause
         # NOTE: The 'second' tropopause should show up darker than first
@@ -2066,7 +2111,8 @@ def xsections(
                 name = 'ctrop' if curvature else 'trop'
                 dtrop, _ = _get_1d_data(data, name + suffix)
                 kwplot = {'label': dtrop.climo.long_label, **trop_kw}
-                plots.add((j, name + suffix, 'plot'), (ax, dtrop, kwplot))
+                cmds = plots.setdefault((j, name + suffix, 'plot'), [])
+                cmds.append((ax, dtrop, kwplot))
 
         # Draw surface contours
         if surf:
@@ -2079,7 +2125,8 @@ def xsections(
                 idx = np.round(pctile * nx / 100).astype(int)
                 dtheta = data['slth'].isel(x=idx)
                 kwplot = {'label': 'surface isopleths', **surf_kw}
-                plots.add((j, 'slth', ax.plot), (ax, dtheta, kwplot))
+                cmds = plots.setdefault((j, 'slth', ax.plot), [])
+                cmds.append((ax, dtheta, kwplot))
 
         # Draw zonal wind line
         if ubar:
@@ -2098,8 +2145,9 @@ def xsections(
     # NOTE: This is done so we can determine default levels based on *multiple* datasets
     # using proplot's auto-level generator. Also simplifies colorbar and legend
     # generation. Unique dictionary keys correspond to unique plot elements.
-    hs = _dict_of_lists()
-    mappables = _dict_of_lists()
+    hs, mappables = {}, {}
+    sine, _, kwfmt = _sine_axis_kludge(xlim=xlim, **kwfmt)
+    xlim = kwfmt.pop('xlim', None)
     for key, commands in plots.items():
         # Get default levels for contour plots from *all* experiment data
         idx, varname, funcname = key
@@ -2128,29 +2176,38 @@ def xsections(
             cbar_kw = colorbar_kw.copy()
             for key in ('creverse', 'clocator', 'cminorlocator', 'cformatter'):
                 cbar_kw.setdefault(key[1:], kwargs.pop(key, None))
+            if cbar_kw.get('minorlocator') is None:
+                cbar_kw.setdefault('tickminor', False)
             if vmin is not None and kwargs.get('levels') is None:
                 kwargs.setdefault('vmin', vmin)
             if vmax is not None and kwargs.get('levels') is None:
                 kwargs.setdefault('vmax', vmax)
-            h = getattr(ax, funcname)(*args, **kwargs)
+            if sine:
+                _, iargs, _ = _sine_axis_kludge(*args, sine=True)
+            else:
+                iargs = args
+            h = getattr(ax, funcname)(*iargs, **kwargs)
 
             # Get colorbar or legend handles and draw quiver keys
             # TODO: Allow quiver key placement in one of standard title locations
             # and add optional outline or background just like inset titles.
             if funcname == 'plot':
                 # Line handle
-                hs.add(key, (ax, h[0]))
+                objs = hs.setdefault(ax, [])
+                objs.append(h[0])
             elif funcname == 'contour' or funcname == 'contourf' and 'colors' in kwargs:
                 # Contour handle
                 h = h.legend_elements()[0][-1]
                 h.set_label(label)
-                hs.add(ax, h)
+                objs = hs.setdefault(ax, [])
+                objs.append(h)
             elif funcname == 'contourf':
                 # Mappable object
                 cbar_kw['label'] = label
-                if cbar_kw['locator'] is None and isinstance(h.norm._norm, pplt.DivergingNorm):  # noqa: E501
+                if cbar_kw.get('locator') is None and isinstance(h.norm._norm, pplt.DivergingNorm):  # noqa: E501
                     cbar_kw['locator'] = pplt.Locator('maxn', symmetric=True)
-                mappables.add(ax, (h, cbar_kw))  # will be added to panel
+                objs = mappables.setdefault(ax, [])
+                objs.append((h, cbar_kw))  # will be added to panel
             elif funcname == 'quiver' and qkey:
                 # Quiver key. Position of each arrow is its *central* position, so left
                 # point of the horizontal arrow is 0.5 * scale axes units to left
